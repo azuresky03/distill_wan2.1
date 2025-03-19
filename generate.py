@@ -16,6 +16,8 @@ import wan
 from wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
 from wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from wan.utils.utils import cache_video, cache_image, str2bool
+from pathlib import Path
+
 
 EXAMPLE_PROMPT = {
     "t2v-1.3B": {
@@ -308,101 +310,63 @@ def generate(args):
             t5_cpu=args.t5_cpu,
         )
 
+        test_file = "/vepfs-zulution/zhangpengpeng/cv/video_generation/HunyuanVideo/test_prompts.txt"
+        with open(test_file, "r") as f:
+            lines = f.readlines()
+
         logging.info(
             f"Generating {'image' if 't2i' in args.task else 'video'} ...")
-        video = wan_t2v.generate(
-            args.prompt,
-            size=SIZE_CONFIGS[args.size],
-            frame_num=args.frame_num,
-            shift=args.sample_shift,
-            sample_solver=args.sample_solver,
-            sampling_steps=args.sample_steps,
-            guide_scale=args.sample_guide_scale,
-            seed=args.base_seed,
-            offload_model=args.offload_model)
+        # for size in SIZE_CONFIGS.values():
+        # for sample_shift in [5,10]:
+        for guide in [0, 2, 4, 8]:
+            for i in [0, 1, 4]:
+                args.prompt = lines[i].strip()
+                prompt_part = args.prompt[:10].replace(' ', '_')
+                for step in [30]:
+                    args.sample_guide_scale = guide
+                    args.sample_steps = step
+                    video = wan_t2v.generate(
+                        args.prompt,
+                        size=SIZE_CONFIGS[args.size],
+                        # size=size,
+                        frame_num=args.frame_num,
+                        shift=args.sample_shift,
+                        sample_solver=args.sample_solver,
+                        sampling_steps=args.sample_steps,
+                        guide_scale=args.sample_guide_scale,
+                        seed=args.base_seed,
+                        offload_model=args.offload_model)
 
-    else:
-        if args.prompt is None:
-            args.prompt = EXAMPLE_PROMPT[args.task]["prompt"]
-        if args.image is None:
-            args.image = EXAMPLE_PROMPT[args.task]["image"]
-        logging.info(f"Input prompt: {args.prompt}")
-        logging.info(f"Input image: {args.image}")
+                    if rank == 0:
+                        # if args.save_file is None:
+                        if True:
+                            formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            formatted_prompt = args.prompt.replace(" ", "_").replace("/",
+                                                                                    "_")[:50]
+                            suffix = '.png' if "t2i" in args.task else '.mp4'
+                            # args.save_file = f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}" + suffix
+                            parent_dir = "/vepfs-zulution/yinhaoyu/Wan_zpp/outputs/exp15/225/"
+                            Path(parent_dir).mkdir(parents=True, exist_ok=True)
+                            args.save_file = str(parent_dir) + f"/steps{step}_guide{guide}_resolution{args.size}_prompt-{prompt_part}" + suffix
 
-        img = Image.open(args.image).convert("RGB")
-        if args.use_prompt_extend:
-            logging.info("Extending prompt ...")
-            if rank == 0:
-                prompt_output = prompt_expander(
-                    args.prompt,
-                    tar_lang=args.prompt_extend_target_lang,
-                    image=img,
-                    seed=args.base_seed)
-                if prompt_output.status == False:
-                    logging.info(
-                        f"Extending prompt failed: {prompt_output.message}")
-                    logging.info("Falling back to original prompt.")
-                    input_prompt = args.prompt
-                else:
-                    input_prompt = prompt_output.prompt
-                input_prompt = [input_prompt]
-            else:
-                input_prompt = [None]
-            if dist.is_initialized():
-                dist.broadcast_object_list(input_prompt, src=0)
-            args.prompt = input_prompt[0]
-            logging.info(f"Extended prompt: {args.prompt}")
-
-        logging.info("Creating WanI2V pipeline.")
-        wan_i2v = wan.WanI2V(
-            config=cfg,
-            checkpoint_dir=args.ckpt_dir,
-            device_id=device,
-            rank=rank,
-            t5_fsdp=args.t5_fsdp,
-            dit_fsdp=args.dit_fsdp,
-            use_usp=(args.ulysses_size > 1 or args.ring_size > 1),
-            t5_cpu=args.t5_cpu,
-        )
-
-        logging.info("Generating video ...")
-        video = wan_i2v.generate(
-            args.prompt,
-            img,
-            max_area=MAX_AREA_CONFIGS[args.size],
-            frame_num=args.frame_num,
-            shift=args.sample_shift,
-            sample_solver=args.sample_solver,
-            sampling_steps=args.sample_steps,
-            guide_scale=args.sample_guide_scale,
-            seed=args.base_seed,
-            offload_model=args.offload_model)
-
-    if rank == 0:
-        if args.save_file is None:
-            formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-            formatted_prompt = args.prompt.replace(" ", "_").replace("/",
-                                                                     "_")[:50]
-            suffix = '.png' if "t2i" in args.task else '.mp4'
-            args.save_file = f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}" + suffix
-
-        if "t2i" in args.task:
-            logging.info(f"Saving generated image to {args.save_file}")
-            cache_image(
-                tensor=video.squeeze(1)[None],
-                save_file=args.save_file,
-                nrow=1,
-                normalize=True,
-                value_range=(-1, 1))
-        else:
-            logging.info(f"Saving generated video to {args.save_file}")
-            cache_video(
-                tensor=video[None],
-                save_file=args.save_file,
-                fps=cfg.sample_fps,
-                nrow=1,
-                normalize=True,
-                value_range=(-1, 1))
+                        if "t2i" in args.task:
+                            logging.info(f"Saving generated image to {args.save_file}")
+                            cache_image(
+                                tensor=video.squeeze(1)[None],
+                                save_file=args.save_file,
+                                nrow=1,
+                                normalize=True,
+                                value_range=(-1, 1))
+                        else:
+                            logging.info(f"Saving generated video to {args.save_file}")
+                            print(f"video shape: {video.shape}, video[None]: {video[None].shape}")
+                            cache_video(
+                                tensor=video[None],
+                                save_file=args.save_file,
+                                fps=cfg.sample_fps,
+                                nrow=1,
+                                normalize=True,
+                                value_range=(-1, 1))
     logging.info("Finished.")
 
 
