@@ -1,0 +1,2 @@
+torchrun --nproc_per_node=8 --master-port 29516 generate.py --task t2v-14B --size 832*480 --sample_steps 20 --ckpt_dir /vepfs-zulution/models/Wan2.1-T2V-14B --dit_fsdp --t5_fsdp --sample_shift 5\
+ --sample_guide_scale 5 --prompt "A cat walks on the grass, realistic style." --base_seed 42

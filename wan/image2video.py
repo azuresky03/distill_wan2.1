@@ -18,7 +18,8 @@ from tqdm import tqdm
 
 from .distributed.fsdp import shard_model
 from .modules.clip import CLIPModel
-from .modules.model import WanModel
+# from .modules.model import WanModel
+from fastvideo.models.wan.modules.model import WanModel
 from .modules.t5 import T5EncoderModel
 from .modules.vae import WanVAE
 from .utils.fm_solvers import (FlowDPMSolverMultistepScheduler,
@@ -244,6 +245,7 @@ class WanI2V:
                          dim=1).to(self.device)
         ])[0]
         y = torch.concat([msk, y])
+        print(f"y shape: {y.shape}, img shape: {img.shape}, mask shape: {msk.shape} noise/latent shape: {noise.shape}")
 
         @contextmanager
         def noop_no_sync():

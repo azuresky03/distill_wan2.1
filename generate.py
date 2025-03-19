@@ -432,7 +432,7 @@ def generate(args):
             parent_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/i2v/org_test"
             Path(parent_dir).mkdir(parents=True, exist_ok=True)
             # args.save_file = str(parent_dir) + f"/step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
-            args.save_file = str(parent_dir) + f"/{args.prompt[:7]}_step{args.sample_steps}_shift{args.shift}_guide{args.sample_guide_scale}.mp4"
+            args.save_file = str(parent_dir) + f"/{args.prompt[:7]}_step{args.sample_steps}_shift{args.sample_shift}_guide{args.sample_guide_scale}.mp4"
 
             if args.save_file is None:
                 formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
