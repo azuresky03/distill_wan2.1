@@ -71,6 +71,7 @@ def usp_dit_forward(
     seq_len,
     clip_fea=None,
     y=None,
+    guidance=None
 ):
     """
     x:              A list of videos each with shape [C, T, H, W].
@@ -103,6 +104,12 @@ def usp_dit_forward(
     with amp.autocast(dtype=torch.float32):
         e = self.time_embedding(
             sinusoidal_embedding_1d(self.freq_dim, t).float())
+        
+        if guidance is not None and self.guidance_embedding is not None:
+            guidance_input = sinusoidal_embedding_1d(self.freq_dim, guidance).float()
+            guidance_emb = self.guidance_embedding(guidance_input)
+            e = e + guidance_emb
+
         e0 = self.time_projection(e).unflatten(1, (6, self.dim))
         assert e.dtype == torch.float32 and e0.dtype == torch.float32
 

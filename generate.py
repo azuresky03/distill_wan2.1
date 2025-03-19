@@ -16,6 +16,8 @@ import wan
 from wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
 from wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from wan.utils.utils import cache_video, cache_image, str2bool
+from pathlib import Path
+
 
 EXAMPLE_PROMPT = {
     "t2v-1.3B": {
@@ -310,17 +312,64 @@ def generate(args):
 
         logging.info(
             f"Generating {'image' if 't2i' in args.task else 'video'} ...")
-        video = wan_t2v.generate(
-            args.prompt,
-            size=SIZE_CONFIGS[args.size],
-            frame_num=args.frame_num,
-            shift=args.sample_shift,
-            sample_solver=args.sample_solver,
-            sampling_steps=args.sample_steps,
-            guide_scale=args.sample_guide_scale,
-            seed=args.base_seed,
-            offload_model=args.offload_model)
+        # for size in SIZE_CONFIGS.values():
+        test_file = "/vepfs-zulution/zhangpengpeng/cv/video_generation/HunyuanVideo/test_prompts.txt"
+        with open(test_file, "r") as f:
+            lines = f.readlines()
+        for guidance in [2,3,4,5,6]:
+            for i in range(1):
+                for shift,step in [(5,30)]:
+                    if i not in [0,1,5,7,9,10,11]:
+                        continue
+                    line = lines[i]
+                    args.prompt = line.strip()
+                    # args.frame_num = frame
+                    args.sample_steps = step
+                    args.sample_shift = shift
+                    args.sample_guide_scale = guidance
+                    video = wan_t2v.generate(
+                        args.prompt,
+                        size=SIZE_CONFIGS[args.size],
+                        # size=size,
+                        frame_num=args.frame_num,
+                        shift=args.sample_shift,
+                        sample_solver=args.sample_solver,
+                        sampling_steps=args.sample_steps,
+                        guide_scale=args.sample_guide_scale,
+                        seed=args.base_seed,
+                        offload_model=args.offload_model)
 
+                    if rank == 0:
+                        # if args.save_file is None:
+                        if True:
+                            formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            formatted_prompt = args.prompt.replace(" ", "_").replace("/",
+                                                                                    "_")[:50]
+                            suffix = '.png' if "t2i" in args.task else '.mp4'
+                            # args.save_file = f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}" + suffix
+                            parent_dir = "/vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/outputs/exp14/prompts_480p"
+                            Path(parent_dir).mkdir(parents=True, exist_ok=True)
+                            # args.save_file = str(parent_dir) + f"/step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
+                            args.save_file = str(parent_dir) + f"/{args.prompt[:7]}_step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
+
+                        if "t2i" in args.task:
+                            logging.info(f"Saving generated image to {args.save_file}")
+                            cache_image(
+                                tensor=video.squeeze(1)[None],
+                                save_file=args.save_file,
+                                nrow=1,
+                                normalize=True,
+                                value_range=(-1, 1))
+                        else:
+                            logging.info(f"Saving generated video to {args.save_file}")
+                            cache_video(
+                                tensor=video[None],
+                                save_file=args.save_file,
+                                fps=cfg.sample_fps,
+                                nrow=1,
+                                normalize=True,
+                                value_range=(-1, 1))
+    
     else:
         if args.prompt is None:
             args.prompt = EXAMPLE_PROMPT[args.task]["prompt"]
@@ -366,6 +415,7 @@ def generate(args):
         )
 
         logging.info("Generating video ...")
+        args.sample_steps = 30
         video = wan_i2v.generate(
             args.prompt,
             img,
@@ -377,24 +427,20 @@ def generate(args):
             guide_scale=args.sample_guide_scale,
             seed=args.base_seed,
             offload_model=args.offload_model)
+        
+        if rank == 0:
+            parent_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/i2v/org_test"
+            Path(parent_dir).mkdir(parents=True, exist_ok=True)
+            # args.save_file = str(parent_dir) + f"/step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
+            args.save_file = str(parent_dir) + f"/{args.prompt[:7]}_step{args.sample_steps}_shift{args.shift}_guide{args.sample_guide_scale}.mp4"
 
-    if rank == 0:
-        if args.save_file is None:
-            formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-            formatted_prompt = args.prompt.replace(" ", "_").replace("/",
-                                                                     "_")[:50]
-            suffix = '.png' if "t2i" in args.task else '.mp4'
-            args.save_file = f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}" + suffix
+            if args.save_file is None:
+                formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                formatted_prompt = args.prompt.replace(" ", "_").replace("/",
+                                                                        "_")[:50]
+                suffix = '.png' if "t2i" in args.task else '.mp4'
+                args.save_file = f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}" + suffix
 
-        if "t2i" in args.task:
-            logging.info(f"Saving generated image to {args.save_file}")
-            cache_image(
-                tensor=video.squeeze(1)[None],
-                save_file=args.save_file,
-                nrow=1,
-                normalize=True,
-                value_range=(-1, 1))
-        else:
             logging.info(f"Saving generated video to {args.save_file}")
             cache_video(
                 tensor=video[None],
@@ -403,6 +449,8 @@ def generate(args):
                 nrow=1,
                 normalize=True,
                 value_range=(-1, 1))
+
+
     logging.info("Finished.")
 
 

@@ -1,0 +1,1 @@
+python scripts/data_preprocess/resize_videos.py --input_dir /cv/wangxuekuan/data/distill --output_dir /vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/data/movie_480 --max_workers 64
