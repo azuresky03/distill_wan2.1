@@ -4,7 +4,7 @@ from safetensors import safe_open
 from fastvideo.models.wan.modules.t5 import T5EncoderModel
 from torch.nn import functional as F
 
-from fastvideo.models.wan.modules.model import WanModel
+from .model_seq import WanModel
 
 def load_wan(config,checkpoint_dir,device_id,rank,weight_path=None):
     transformers = WanModel.from_pretrained(checkpoint_dir)
