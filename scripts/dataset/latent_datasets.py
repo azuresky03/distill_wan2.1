@@ -64,10 +64,6 @@ class LatentDataset(Dataset):
                 map_location="cpu",
                 weights_only=True,
             )
-        
-        #####
-        # latent = 
-        #####
         return latent, prompt_embed, prompt_attention_mask
 
     def __len__(self):

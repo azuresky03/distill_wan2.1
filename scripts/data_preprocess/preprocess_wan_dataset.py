@@ -12,6 +12,8 @@ from tqdm import tqdm
 from scripts.dataset import getdataset
 
 from wan.modules.vae import WanVAE
+from wan.modules.t5 import T5EncoderModel
+from wan.modules.clip import CLIPModel
 
 logger = get_logger(__name__)
 
@@ -21,6 +23,7 @@ def main(args):
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size, "local rank", local_rank)
     train_dataset = getdataset(args)
+    assert args.train_batch_size==1, "only support batch size 1"
     sampler = DistributedSampler(train_dataset, rank=local_rank, num_replicas=world_size, shuffle=True)
     train_dataloader = DataLoader(
         train_dataset,
@@ -29,44 +32,90 @@ def main(args):
         num_workers=args.dataloader_num_workers,
     )
 
-    encoder_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.set_device(local_rank)
     if not dist.is_initialized():
         dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
-    vae = WanVAE(vae_pth=args.model_path)
-    # autocast_type = next(vae.model.parameters()).dtype
+
     autocast_type = torch.bfloat16
-    vae.model = vae.model.to(encoder_device).to(autocast_type)
+
+    vae = WanVAE(vae_pth=os.path.join(args.model_path, "Wan2.1_VAE.pth"))
+    vae.model = vae.model.to(device).to(autocast_type)
     vae.model.eval()
     vae.model.requires_grad_(False)
-    # vae.model.enable_tiling()
+
+    text_encoder = T5EncoderModel(
+        text_len=512,
+        dtype=autocast_type,
+        device=device,
+        checkpoint_path=os.path.join(args.model_path, "models_t5_umt5-xxl-enc-bf16.pth"),
+        tokenizer_path=os.path.join(args.model_path, "google/umt5-xxl"),
+        shard_fn= None,
+    )
+
+    clip = CLIPModel(
+            dtype=autocast_type,
+            device=device,
+            checkpoint_path=os.path.join(args.model_path,'models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth'),
+            tokenizer_path=os.path.join(args.model_path, 'xlm-roberta-large'))
+
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "latent"), exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "prompt_embed"), exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "y"), exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "clip_feature"), exist_ok=True)
 
     json_data = []
     for _, data in tqdm(enumerate(train_dataloader), disable=local_rank != 0):
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=autocast_type):
-                input = data["pixel_values"].to(encoder_device)
-                # latents = vae.encode(input)["latent_dist"].sample()
-                latents = vae.encode(input)
-            for idx, video_path in enumerate(data["path"]):
-                video_name = os.path.basename(video_path).split(".")[0]
-                latent_path = os.path.join(args.output_dir, "latent", video_name + ".pt")
-                torch.save(latents[idx].to(torch.bfloat16), latent_path)
-                item = {}
-                item["length"] = latents[idx].shape[1]
-                item["latent_path"] = video_name + ".pt"
-                item["caption"] = data["text"][idx]
-                json_data.append(item)
-                print(f"{video_name} processed")
+                input = data["pixel_values"].to(device)
+                latents = vae.encode(input)[0]
+
+                txt = data["text"]
+                text_embed = text_encoder(txt,device)[0]
+
+                img = data["img"][0]
+                h, lat_h = args.max_height, args.max_height // 8
+                w, lat_w = args.max_width, args.max_width // 8
+                msk = torch.ones(1, 81, lat_h, lat_w, device=device)
+                msk[:, 1:] = 0
+                msk = torch.concat([
+                    torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]
+                ],dim=1)
+                msk = msk.view(1, msk.shape[1] // 4, 4, lat_h, lat_w)
+                msk = msk.transpose(1, 2)[0]
+                y = vae.encode([
+                    torch.concat([
+                        torch.nn.functional.interpolate(
+                        img[None].cpu(), size=(h, w), mode='bicubic').transpose(0, 1),
+                        torch.zeros(3, 80, h, w)
+                    ],dim=1).to(device)
+                ])[0]
+                y = torch.concat([msk, y])
+                clip_context = clip.visual([img[:, None, :, :].to(device)])[0]
+
+            video_name = os.path.basename(data["path"][0])
+            video_suffix = video_name.split(".")[-1]
+            video_name = video_name[: -len(video_suffix) - 1]
+            
+            item = {}
+
+            for name, tensor in zip(["latent", "prompt_embed", "y", "clip_feature"], [latents, text_embed, y, clip_context]):
+                tensor_path = os.path.join(args.output_dir, name, video_name + ".pt")
+                torch.save(tensor.to(autocast_type), tensor_path)
+                item[name + "_path"] = tensor_path
+            
+            item["length"] = latents.shape[1]
+            item["caption"] = data["text"][0]
+            json_data.append(item)
     dist.barrier()
     local_data = json_data
     gathered_data = [None] * world_size
     dist.all_gather_object(gathered_data, local_data)
     if local_rank == 0:
         all_json_data = [item for sublist in gathered_data for item in sublist]
-        with open(os.path.join(args.output_dir, "videos2caption_temp.json"), "w") as f:
+        with open(os.path.join(args.output_dir, "videos2caption.json"), "w") as f:
             json.dump(all_json_data, f, indent=4)
 
 

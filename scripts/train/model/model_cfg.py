@@ -2,7 +2,7 @@
 import math
 
 import torch
-import torch.cuda.amp as amp
+import torch.amp as amp
 import torch.nn as nn
 import torch.distributed as dist
 from diffusers.configuration_utils import ConfigMixin, register_to_config
@@ -13,14 +13,7 @@ from fastvideo.models.wan.modules.attention import flash_attention
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 
-__all__ = ['WanModel']
-
-
-
-from xfuser.core.distributed import (get_sequence_parallel_rank,
-                                     get_sequence_parallel_world_size,
-                                     get_sp_group)
-from xfuser.core.long_ctx_attention import xFuserLongContextAttention
+__all__ = ['WanModelCFG']
 
 def pad_freqs(original_tensor, target_len):
     seq_len, s1, s2 = original_tensor.shape
@@ -35,7 +28,7 @@ def pad_freqs(original_tensor, target_len):
     return padded_tensor
 
 
-@amp.autocast(enabled=False)
+@amp.autocast("cuda",enabled=False)
 def rope_apply_dist(x, grid_sizes, freqs):
     """
     x:          [B, L, N, C].
@@ -91,7 +84,7 @@ def sinusoidal_embedding_1d(dim, position):
     return x
 
 
-@amp.autocast(enabled=False)
+@amp.autocast("cuda",enabled=False)
 def rope_params(max_seq_len, dim, theta=10000):
     assert dim % 2 == 0
     freqs = torch.outer(
@@ -102,7 +95,7 @@ def rope_params(max_seq_len, dim, theta=10000):
     return freqs
 
 
-@amp.autocast(enabled=False)
+@amp.autocast("cuda",enabled=False)
 def rope_apply(x, grid_sizes, freqs):
     n, c = x.size(2), x.size(3) // 2
 
@@ -118,7 +111,6 @@ def rope_apply(x, grid_sizes, freqs):
         x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
             seq_len, n, -1, 2))
         freqs_i = torch.cat([
-            # freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
             freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
             freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
             freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
@@ -206,8 +198,6 @@ class WanSelfAttention(nn.Module):
         """
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
         rank = dist.get_rank()
-        # if rank == 0:
-        #     print(f'x_in_attn: {x.sum()}')  
 
         # query, key, value function
         def qkv_fn(x):
@@ -217,8 +207,6 @@ class WanSelfAttention(nn.Module):
             return q, k, v
 
         q, k, v = qkv_fn(x)
-        # if rank == 0:
-        #     print(f'q_in_attn: {q.sum()}')  
 
         if get_sequence_parallel_state():
             q = rope_apply_dist(q, grid_sizes, freqs)
@@ -227,27 +215,10 @@ class WanSelfAttention(nn.Module):
             q = rope_apply(q, grid_sizes, freqs)
             k = rope_apply(k, grid_sizes, freqs)
 
-        # if rank == 0:
-        #     print(f'q_roped_attn: {q.sum()}')  
-
         if get_sequence_parallel_state():
             q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
             k = all_to_all_4D(k, scatter_dim=2, gather_dim=1)
             v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
-
-        # if get_sequence_parallel_state():
-        # # batch_size, seq_len, attn_heads, head_dim 
-        #     q = all_gather(q, dim=1).contiguous()
-        #     k = all_gather(k, dim=1).contiguous()
-
-        # q = rope_apply(q, grid_sizes, freqs)
-        # k = rope_apply(k, grid_sizes, freqs)
-
-        # if get_sequence_parallel_state():
-        #     q = shrink_head(q, dim=2)
-        #     k = shrink_head(k, dim=2)
-        #     v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
-
         x = flash_attention(
             q=q,
             k=k,
@@ -256,16 +227,10 @@ class WanSelfAttention(nn.Module):
             window_size=self.window_size)
         if get_sequence_parallel_state():
             x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
-        
-        # if rank == 0:
-            # print(f'x_attned: {x.sum()}, {x.shape}') 
 
         # output
         x = x.flatten(2)
         x = self.o(x)
-        # if rank == 0:
-            # print(f'x_attn_out: {x.sum()}, {x.shape}')  
-            # print('--------')
         return x
 
 class WanT2VCrossAttention(WanSelfAttention):
@@ -278,7 +243,6 @@ class WanT2VCrossAttention(WanSelfAttention):
             context_lens(Tensor): Shape [B]
         """
         b, n, d = x.size(0), self.num_heads, self.head_dim
-        # print(f'rank {dist.get_rank()}, getin cross attn {x.sum()}, ctx: {context.sum()}')
 
         # compute query, key, value
         q = self.norm_q(self.q(x)).view(b, -1, n, d)
@@ -410,7 +374,7 @@ class WanAttentionBlock(nn.Module):
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
         assert e.dtype == torch.float32
-        with amp.autocast(dtype=torch.float32):
+        with amp.autocast("cuda",dtype=torch.float32):
             e = (self.modulation + e).chunk(6, dim=1)
         assert e[0].dtype == torch.float32
 
@@ -418,30 +382,18 @@ class WanAttentionBlock(nn.Module):
         y = self.self_attn(
             self.norm1(x).float() * (1 + e[1]) + e[0], seq_lens, grid_sizes,
             freqs)
-        with amp.autocast(dtype=torch.float32):
+        with amp.autocast("cuda",dtype=torch.float32):
             x = x + y * e[2]
 
         # cross-attention & ffn function
         def cross_attn_ffn(x, context, context_lens, e):
             x = x + self.cross_attn(self.norm3(x), context, context_lens)
             y = self.ffn(self.norm2(x).float() * (1 + e[4]) + e[3])
-            with amp.autocast(dtype=torch.float32):
+            with amp.autocast("cuda",dtype=torch.float32):
                 x = x + y * e[5]
             return x
 
-        # dist.barrier()
-        # print(f'rank {dist.get_rank()}, before cross attn {x.sum()}, ctx: {context.sum()}')
-        # dist.barrier()
         x = cross_attn_ffn(x, context, context_lens, e)
-        # dist.barrier()
-        # print(f'rank {dist.get_rank()}, after cross attn {x.sum()}')
-        # dist.barrier()
-
-        # dist.barrier()
-        # if dist.get_rank() == 0:
-        #     print(f'attn block out {x.sum()}')
-        # dist.barrier()
-
         return x
 
 
@@ -469,7 +421,7 @@ class Head(nn.Module):
             e(Tensor): Shape [B, C]
         """
         assert e.dtype == torch.float32
-        with amp.autocast(dtype=torch.float32):
+        with amp.autocast("cuda",dtype=torch.float32):
             e = (self.modulation + e.unsqueeze(1)).chunk(2, dim=1)
             x = (self.head(self.norm(x) * (1 + e[1]) + e[0]))
         return x
@@ -490,7 +442,7 @@ class MLPProj(torch.nn.Module):
         return clip_extra_context_tokens
 
 
-class WanModel(ModelMixin, ConfigMixin):
+class WanModelCFG(ModelMixin, ConfigMixin):
     r"""
     Wan diffusion backbone supporting both text-to-video and image-to-video.
     """
@@ -516,7 +468,9 @@ class WanModel(ModelMixin, ConfigMixin):
                  window_size=(-1, -1),
                  qk_norm=True,
                  cross_attn_norm=True,
-                 eps=1e-6):
+                 guidance_embed=False,  # 添加 guidance_embed 参数
+                 eps=1e-6,
+                 zero_init=True):
         r"""
         Initialize the diffusion model backbone.
 
@@ -549,6 +503,8 @@ class WanModel(ModelMixin, ConfigMixin):
                 Enable query/key normalization
             cross_attn_norm (`bool`, *optional*, defaults to False):
                 Enable cross-attention normalization
+            guidance_embed (`bool`, *optional*, defaults to False):
+                Enable guidance embedding
             eps (`float`, *optional*, defaults to 1e-6):
                 Epsilon value for normalization layers
         """
@@ -583,6 +539,18 @@ class WanModel(ModelMixin, ConfigMixin):
         self.time_embedding = nn.Sequential(
             nn.Linear(freq_dim, dim), nn.SiLU(), nn.Linear(dim, dim))
         self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
+
+        # 添加 guidance 嵌入层
+        if guidance_embed:
+            self.guidance_embedding = nn.Sequential(
+                nn.Linear(freq_dim, dim), nn.SiLU(), nn.Linear(dim, dim)
+            )
+            if zero_init:
+                for layer in [self.guidance_embedding[0],self.guidance_embedding[2]]:
+                    nn.init.normal_(layer.weight, mean=0, std=1e-2)
+                    nn.init.normal_(layer.bias, mean=0, std=1e-2)
+        else:
+            self.guidance_embedding = None
 
         # blocks
         cross_attn_type = 't2v_cross_attn' if model_type == 't2v' else 'i2v_cross_attn'
@@ -621,6 +589,7 @@ class WanModel(ModelMixin, ConfigMixin):
         context_mask=None,
         clip_fea=None,
         y=None,
+        guidance=None,  # 添加 guidance 参数
     ):
         r"""
         Forward pass through the diffusion model
@@ -639,19 +608,13 @@ class WanModel(ModelMixin, ConfigMixin):
                 CLIP image features for image-to-video mode
             y (List[Tensor], *optional*):
                 Conditional video inputs for image-to-video mode, same shape as x
+            guidance (Tensor, *optional*):
+                Guidance tensor of shape [B, 1]
 
         Returns:
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
-        rank = dist.get_rank()
-        # if rank == 0:
-        #     print('inside dit forward:')
-        #     print('x: ', x[0][0][0][0][:10])
-        #     # print('context', batch_context, context)
-        #     # print('context: ', batch_context[0][0][:10])
-        #     print('t: ', t)
-        dist.barrier()
 
         if self.model_type == 'i2v':
             assert clip_fea is not None and y is not None
@@ -664,33 +627,13 @@ class WanModel(ModelMixin, ConfigMixin):
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
 
         # embeddings
-        # if get_sequence_parallel_state():
-        #     print(f"device{device} x {x[0].shape}")
-        #     new_x = []
-        #     for u in x:
-        #         u = all_gather(u,dim=1).contiguous()
-        #         print(f"device{device} u after all gather{u.shape}")
-        #         u = self.patch_embedding(u.unsqueeze(0))
-        #         one_seq_len = u.size(2) // nccl_info.sp_size
-        #         new_x.append(u.narrow(2, nccl_info.rank_within_group * one_seq_len, one_seq_len))
-        #     print(f"device{device} new_x {new_x[0].shape}")
-        #     x = new_x
-        # else:
         x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
-        # print(f'rank {rank} embeds x {x[0].shape}, {x[0].sum()}') #[1, 5120, 20, 30, 52] [B, C, F, H, W]
-        dist.barrier()
-
         grid_sizes = torch.stack(
             [torch.tensor(u.shape[2:], dtype=torch.long) for u in x])
-        # if get_sequence_parallel_state():
-        #     org_grid_sizes = grid_sizes.clone()
-        #     grid_sizes[:,0] *= nccl_info.sp_size
-
         x = [u.flatten(2).transpose(1, 2) for u in x]
-        # print(f'rank {rank} flattened x {x[0].shape}, {x[0].sum()}')
-        dist.barrier()
+
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
-        print(f"max seq_lens {seq_lens.max()}")
+
         assert seq_lens.max() <= seq_len
         x = torch.cat([
             torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
@@ -698,32 +641,31 @@ class WanModel(ModelMixin, ConfigMixin):
         ])
 
         # time embeddings
-        with amp.autocast(dtype=torch.float32):
+        with amp.autocast("cuda",dtype=torch.float32):
             e = self.time_embedding(
                 sinusoidal_embedding_1d(self.freq_dim, t).float())
+            
+            # 应用 guidance 嵌入
+            if self.guidance_embedding is not None and guidance is not None:
+                guidance_input = sinusoidal_embedding_1d(self.freq_dim, guidance).float()
+                guidance_emb = self.guidance_embedding(guidance_input)
+                e = e + guidance_emb
+                
             e0 = self.time_projection(e).unflatten(1, (6, self.dim))
             assert e.dtype == torch.float32 and e0.dtype == torch.float32
 
-        # context
-        ############
-        # context = batch_context
-        ############
-        # print(f'rank {rank} ctx {batch_context[0].shape}, {batch_context[0].sum()}')
-        dist.barrier()
+
         context_lens = None
         if context is not None:
-            print('Should not be here')
             context = self.text_embedding(
                 torch.stack([
                     torch.cat(
                         [u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
                     for u in context
                 ]))
-            dist.barrier()
         else:
             assert batch_context is not None
             context = self.text_embedding(batch_context)
-        # print(f'rank {rank} embed ctx {context[0].shape}, {context.sum()}')
 
         if clip_fea is not None:
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
@@ -738,49 +680,19 @@ class WanModel(ModelMixin, ConfigMixin):
             context=context,
             context_lens=context_lens)
 
-        # i = 0
-        # print(f'rank {rank}: attn x {x.shape}, {x.sum()}') #[1, 5120, 20, 30, 52] [B, C, F, H, W] -> [1, 31200, 5120] [B, HWF, C]
-        dist.barrier()
-        # for block in self.blocks:
-        #     # print(f"device{device} block {i}")
-        #     x = block(x, **kwargs)
-        
         x = torch.chunk(x, nccl_info.sp_size, dim=1)[nccl_info.rank_within_group]
-        
-        # print(f'rank {rank}: chunked x {x.shape}, {x.sum()}')
-        dist.barrier()
+
         for block in self.blocks:
             x = block(x, **kwargs)
 
-            # if rank == 0:
-            #     print(f'in loop x: {x.sum()}')
-            # dist.barrier()
-            # assert(False)
-        dist.barrier()
-        # Context Parallel
-
-        ###
-        # x_split = x.clone()
-        # x_split = self.head(x_split, e)
-        # grid_sizes_split = grid_sizes.clone()
-        # grid_sizes_split[0] = grid_sizes_split[0] // nccl_info.sp_size
-        # x_split = self.unpatchify(x_split, grid_sizes_split)
-        # x_split = [u.float() for u in x_split]
-        ###
-
-        x = all_gather(x,dim=1).contiguous()
-        # print(f'rank {rank}: gathered x {x.shape}, {x.sum()}')
-        # dist.barrier()
+        if get_sequence_parallel_state():
+            x = all_gather(x,dim=1).contiguous()
 
         # head
         x = self.head(x, e)
 
-        # if get_sequence_parallel_state():
-        #     grid_sizes = org_grid_sizes
-
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
-        # print(f'rank {rank}: out x {x[0].shape}, {x[0].sum()}')
         return [u.float() for u in x]
 
     def unpatchify(self, x, grid_sizes):
