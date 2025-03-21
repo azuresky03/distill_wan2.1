@@ -40,6 +40,7 @@ class WanI2V:
         use_usp=False,
         t5_cpu=False,
         init_on_cpu=True,
+        transfromer_dir = None
     ):
         r"""
         Initializes the image-to-video generation model components.
@@ -97,7 +98,12 @@ class WanI2V:
             tokenizer_path=os.path.join(checkpoint_dir, config.clip_tokenizer))
 
         logging.info(f"Creating WanModel from {checkpoint_dir}")
-        self.model = WanModel.from_pretrained(checkpoint_dir)
+        if transfromer_dir:
+            from scripts.train.model.model_cfg import WanModelCFG
+            self.model = WanModelCFG.from_pretrained(transfromer_dir)
+            logging.info(f"loaded transformer from {transfromer_dir}")
+        else:
+            self.model = WanModel.from_pretrained(checkpoint_dir)
         self.model.eval().requires_grad_(False)
 
         if t5_fsdp or dit_fsdp or use_usp:
@@ -245,7 +251,7 @@ class WanI2V:
                          dim=1).to(self.device)
         ])[0]
         y = torch.concat([msk, y])
-        print(f"y shape: {y.shape}, img shape: {img.shape}, mask shape: {msk.shape} noise/latent shape: {noise.shape}")
+        # print(f"y shape: {y.shape}, img shape: {img.shape}, mask shape: {msk.shape} noise/latent shape: {noise.shape}")
 
         @contextmanager
         def noop_no_sync():
@@ -304,19 +310,31 @@ class WanI2V:
 
                 timestep = torch.stack(timestep).to(self.device)
 
-                noise_pred_cond = self.model(
-                    latent_model_input, t=timestep, **arg_c)[0].to(
-                        torch.device('cpu') if offload_model else self.device)
-                if offload_model:
-                    torch.cuda.empty_cache()
-                noise_pred_uncond = self.model(
-                    latent_model_input, t=timestep, **arg_null)[0].to(
-                        torch.device('cpu') if offload_model else self.device)
-                if offload_model:
-                    torch.cuda.empty_cache()
-                noise_pred = noise_pred_uncond + guide_scale * (
-                    noise_pred_cond - noise_pred_uncond)
-
+                if not hasattr(self.model,"guidance_embedding") and guide_scale!=1:
+                    noise_pred_cond = self.model(
+                        latent_model_input, t=timestep, **arg_c)[0].to(
+                            torch.device('cpu') if offload_model else self.device)
+                    if offload_model:
+                        torch.cuda.empty_cache()
+                    noise_pred_uncond = self.model(
+                        latent_model_input, t=timestep, **arg_null)[0].to(
+                            torch.device('cpu') if offload_model else self.device)
+                    if offload_model:
+                        torch.cuda.empty_cache()
+                    noise_pred = noise_pred_uncond + guide_scale * (
+                        noise_pred_cond - noise_pred_uncond)
+                elif not hasattr(self.model,"guidance_embedding") and guide_scale==1:
+                    noise_pred = self.model(
+                        latent_model_input, t=timestep, **arg_c)[0].to(
+                            torch.device('cpu') if offload_model else self.device)
+                else:
+                    assert self.model.guidance_embedding is not None
+                    guidance_tensor = torch.tensor([guide_scale*1000],
+                        device=latent_model_input[0].device,
+                        dtype=torch.bfloat16)
+                    noise_pred = self.model(
+                        latent_model_input, t=timestep,guidance=guidance_tensor, **arg_c)[0].to(
+                            torch.device('cpu') if offload_model else self.device)
                 latent = latent.to(
                     torch.device('cpu') if offload_model else self.device)
 

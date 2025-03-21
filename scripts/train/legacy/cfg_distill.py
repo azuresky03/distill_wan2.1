@@ -41,7 +41,7 @@ from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, Qw
 from fastvideo.models.wan.utils.utils import cache_video, cache_image, str2bool
 from fastvideo.models.wan.modules.model_cfg import WanModelCFG
 
-from scripts.train.util import load_wan
+from scripts.train.util.util import load_wan
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")

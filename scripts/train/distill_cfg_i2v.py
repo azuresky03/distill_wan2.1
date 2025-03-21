@@ -28,7 +28,7 @@ from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 from fastvideo.utils.checkpoint import (resume_lora_optimizer, save_checkpoint, save_lora_checkpoint)
 from fastvideo.utils.communications import broadcast
-from scripts.train.hidden_communication_data_wrapper import sp_parallel_dataloader_wrapper
+from scripts.train.util.hidden_communication_data_wrapper import sp_parallel_dataloader_wrapper
 from fastvideo.utils.dataset_utils import LengthGroupedSampler
 from fastvideo.utils.fsdp_util import (apply_fsdp_checkpointing, get_dit_fsdp_kwargs)
 from fastvideo.utils.load import load_transformer
@@ -42,7 +42,7 @@ from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, Qw
 from fastvideo.models.wan.utils.utils import cache_video, cache_image, str2bool
 from scripts.train.model.model_cfg import WanModelCFG, WanAttentionBlock
 
-from scripts.train.util import load_wan, load_weights
+from scripts.train.util.util import load_wan, load_weights
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")

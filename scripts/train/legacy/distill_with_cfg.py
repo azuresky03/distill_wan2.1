@@ -40,7 +40,7 @@ from fastvideo.models.wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CON
 from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from fastvideo.models.wan.utils.utils import cache_video, cache_image, str2bool
 
-from scripts.train.util import load_weights, load_wan
+from scripts.train.util.util import load_weights, load_wan
 from wan.utils.utils import cache_video
 from fastvideo.models.wan.modules.model_cfg import WanModelCFG
 

@@ -42,13 +42,13 @@ from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, Qw
 from fastvideo.models.wan.utils.utils import cache_video, cache_image, str2bool
 from scripts.train.model_cfg import WanAttentionBlock as WanAttentionBlock_CFG
 from scripts.train.model_cfg import WanModelCFG
-from scripts.train.communication_data_wrapper import sp_parallel_dataloader_wrapper
+from scripts.train.util.communication_data_wrapper import sp_parallel_dataloader_wrapper
 
 from scripts.train.model_seq import WanAttentionBlock as WanAttentionBlock_SEQ
 
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 
-from scripts.train.util import load_wan, load_weights
+from scripts.train.util.util import load_wan, load_weights
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")

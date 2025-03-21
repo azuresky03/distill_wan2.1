@@ -41,7 +41,7 @@ from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, Qw
 from fastvideo.models.wan.utils.utils import cache_video, cache_image, str2bool
 from fastvideo.models.wan.modules.model import WanAttentionBlock
 
-from scripts.train.util import load_wan
+from scripts.train.util.util import load_wan
 from wan.utils.utils import cache_video
 from wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
 import numpy as np
