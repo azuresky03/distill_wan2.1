@@ -36,6 +36,8 @@ def prepare_sequence_parallel_data(hidden_states, encoder_hidden_states, attenti
             encoder_hidden_states,
             attention_mask,
             encoder_attention_mask,
+            ys,
+            clip_features,
         )
 
     sp_size = nccl_info.sp_size
@@ -56,7 +58,7 @@ def prepare_sequence_parallel_data(hidden_states, encoder_hidden_states, attenti
         attention_mask.repeat(1, sp_size, 1, 1),
         encoder_attention_mask.repeat(1, sp_size),
         ys.repeat(1, sp_size, 1, 1, 1),
-        clip_features.repeat(1, sp_size),
+        clip_features.repeat(1, sp_size, 1),
     )
 
     # print('shapes 2:', hidden_states.shape, encoder_hidden_states.shape, attention_mask.shape, encoder_attention_mask.shape)

@@ -306,36 +306,38 @@ def main(args):
 
     cfg = WAN_CONFIGS[args.task]
 
-    old_transformer = load_wan(
-        config=cfg,
-        checkpoint_dir=args.ckpt_dir,
-        device_id=device,
-        rank=rank,
-    )
-    state_dict = load_weights(args.resume_from_weight)
-    model_config = dict(old_transformer.config)
-    model_config["guidance_embed"] = True
-    transformer = WanModelCFG(**model_config)
-    result = transformer.load_state_dict(state_dict,strict=False)
-    if rank <= 0:
-        print("Missing keys:", result.missing_keys)
-        print("Unexpected keys:", result.unexpected_keys)
-        print(f"CFG: load student distill model success {args.resume_from_weight}")
+    # old_transformer = load_wan(
+    #     config=cfg,
+    #     checkpoint_dir=args.ckpt_dir,
+    #     device_id=device,
+    #     rank=rank,
+    # )
+    # state_dict = load_weights(args.resume_from_weight)
+    # model_config = dict(old_transformer.config)
+    # model_config["guidance_embed"] = True
+    # transformer = WanModelCFG(**model_config)
+    # result = transformer.load_state_dict(state_dict,strict=False)
+    # if rank <= 0:
+    #     print("Missing keys:", result.missing_keys)
+    #     print("Unexpected keys:", result.unexpected_keys)
+    #     print(f"CFG: load student distill model success {args.resume_from_weight}")
+    transformer = WanModelCFG.from_pretrained(args.resume_from_weight).train()
     transformer.requires_grad_(True)
 
-    teacher_transformer = WanModelCFG(**model_config)
-    result = teacher_transformer.load_state_dict(state_dict,strict=False)
-    if rank <= 0:
-        print("Missing keys:", result.missing_keys)
-        print("Unexpected keys:", result.unexpected_keys)
-        print(f"CFG: load teacher distill model success {args.resume_from_weight}")
+    # teacher_transformer = WanModelCFG(**model_config)
+    # result = teacher_transformer.load_state_dict(state_dict,strict=False)
+    # if rank <= 0:
+    #     print("Missing keys:", result.missing_keys)
+    #     print("Unexpected keys:", result.unexpected_keys)
+    #     print(f"CFG: load teacher distill model success {args.resume_from_weight}")
+    teacher_transformer = WanModelCFG.from_pretrained(args.resume_from_weight)
     teacher_transformer.requires_grad_(False)
     if args.use_ema:
         ema_transformer = deepcopy(transformer)
     else:
         ema_transformer = None
     
-    del state_dict, old_transformer
+    # del state_dict, old_transformer
     torch.cuda.empty_cache()
     main_print(
         f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
@@ -374,7 +376,7 @@ def main(args):
     if args.use_ema:
         ema_transformer.requires_grad_(False)
 
-    DEBUG = True
+    DEBUG = False
     if DEBUG:
         from wan.modules.vae import WanVAE
         vae = WanVAE(vae_pth="/vepfs-zulution/models/Wan2.1-T2V-14B/Wan2.1_VAE.pth")

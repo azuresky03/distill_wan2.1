@@ -333,9 +333,22 @@ class WanI2VCrossAttention(WanSelfAttention):
         v = self.v(context).view(b, -1, n, d)
         k_img = self.norm_k_img(self.k_img(context_img)).view(b, -1, n, d)
         v_img = self.v_img(context_img).view(b, -1, n, d)
+
+        if get_sequence_parallel_state():
+        # batch_size, seq_len, attn_heads, head_dim
+            q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
+            k = shrink_head(k, dim=2)
+            v = shrink_head(v, dim=2)
+            k_img = shrink_head(k_img, dim=2)
+            v_img = shrink_head(v_img, dim=2)
+
         img_x = flash_attention(q, k_img, v_img, k_lens=None)
         # compute attention
         x = flash_attention(q, k, v, k_lens=context_lens)
+
+        if get_sequence_parallel_state():
+            img_x = all_to_all_4D(img_x, scatter_dim=1, gather_dim=2)
+            x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
 
         # output
         x = x.flatten(2)
@@ -714,11 +727,7 @@ class WanModel(ModelMixin, ConfigMixin):
 
 
         if get_sequence_parallel_state():
-            dist.barrier()
-            print(f"rank {rank} read to gather, x {x.shape}, {x.sum()}")
             x = all_gather(x.contiguous(),dim=1).contiguous()
-            print(f'rank {rank}: gathered x {x.shape}, {x.sum()}')
-            dist.barrier()
 
         # head
         x = self.head(x, e)
