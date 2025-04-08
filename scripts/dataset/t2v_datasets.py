@@ -133,7 +133,7 @@ class T2V_dataset(Dataset):
             print(f"{video_path} frame_indices[-1] {frame_indices[-1]} >= len(torchvision_video) {len(torchvision_video)}")
             return 0
         video = torchvision_video[frame_indices]
-        video = self.transform(video)
+        # video = self.transform(video)
         video = rearrange(video, "t c h w -> c t h w")
         video = video.to(torch.uint8)
         assert video.dtype == torch.uint8

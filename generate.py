@@ -299,6 +299,12 @@ def generate(args):
             logging.info(f"Extended prompt: {args.prompt}")
 
         logging.info("Creating WanT2V pipeline.")
+        # args.size, size_name = "832*480", "480p"
+        args.size, size_name = "1280*720", "720p"
+        lora_alpha = 32
+        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/exp_results/exp2.9/{size_name}_{lora_alpha}"
+        transfromer_dir = "/cv/wangxuekuan/exp_models/distill/wanx-t2v/s5_exp0/checkpoint-1000"
+        lora_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/outputs/exp2.9/checkpoint-400"
         wan_t2v = wan.WanT2V(
             config=cfg,
             checkpoint_dir=args.ckpt_dir,
@@ -308,6 +314,9 @@ def generate(args):
             dit_fsdp=args.dit_fsdp,
             use_usp=(args.ulysses_size > 1 or args.ring_size > 1),
             t5_cpu=args.t5_cpu,
+            transfromer_dir=transfromer_dir,
+            lora_dir=lora_dir,
+            lora_alpha=lora_alpha,
         )
 
         logging.info(
@@ -316,11 +325,11 @@ def generate(args):
         test_file = "/vepfs-zulution/zhangpengpeng/cv/video_generation/HunyuanVideo/test_prompts.txt"
         with open(test_file, "r") as f:
             lines = f.readlines()
-        for guidance in [2,3,4,5,6]:
-            for i in range(1):
-                for shift,step in [(5,30)]:
-                    if i not in [0,1,5,7,9,10,11]:
-                        continue
+        for guidance in [8]:
+            for i in range(20):
+                for shift,step in [(13,7)]:
+                    # if i > 8:
+                    #     continue
                     line = lines[i]
                     args.prompt = line.strip()
                     # args.frame_num = frame
@@ -347,7 +356,6 @@ def generate(args):
                                                                                     "_")[:50]
                             suffix = '.png' if "t2i" in args.task else '.mp4'
                             # args.save_file = f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}" + suffix
-                            parent_dir = "/vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/outputs/exp14/prompts_480p"
                             Path(parent_dir).mkdir(parents=True, exist_ok=True)
                             # args.save_file = str(parent_dir) + f"/step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
                             args.save_file = str(parent_dir) + f"/{args.prompt[:7]}_step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
@@ -403,7 +411,7 @@ def generate(args):
             logging.info(f"Extended prompt: {args.prompt}")
 
         transfromer_dir = ""
-        transfromer_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp15_distill_cfg_i2v/checkpoint-500/"
+        transfromer_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp18_distill_step_i2v_7/checkpoint-350"
         logging.info("Creating WanI2V pipeline.")
         wan_i2v = wan.WanI2V(
             config=cfg,
@@ -418,11 +426,11 @@ def generate(args):
         )
 
         logging.info("Generating video ...")
-        args.sample_steps = 30
+        args.sample_steps = 15
         
         # args.size, size_name = "480*832", "480p"
         args.size, size_name = "1280*720", "720p"
-        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/exp15_i2v_cfg/500_{size_name}_prompts"
+        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/exp18_i2v_step_7/350_{size_name}_prompts"
         prompts_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/examples/i2v/"
         with open(prompts_dir+"all.txt", "r") as f:
             lines = f.readlines()
@@ -430,8 +438,8 @@ def generate(args):
             logging.info(f"prompt: {prompt}, image: {image_dir}")
             img = Image.open(prompts_dir+image_dir).convert("RGB")
             args.prompt = prompt
-            for guidance in [5]:
-                for shift in [3]:
+            for guidance in [5,8]:
+                for shift in [10,13]:
                     args.sample_shift = shift
                     args.sample_guide_scale = guidance
                     video = wan_i2v.generate(

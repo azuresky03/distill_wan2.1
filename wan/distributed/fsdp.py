@@ -16,6 +16,7 @@ def shard_model(
     process_group=None,
     sharding_strategy=ShardingStrategy.FULL_SHARD,
     sync_module_states=True,
+    lora=False,
 ):
     model = FSDP(
         module=model,
@@ -28,5 +29,6 @@ def shard_model(
             reduce_dtype=reduce_dtype,
             buffer_dtype=buffer_dtype),
         device_id=device_id,
+        use_orig_params=lora,
         sync_module_states=sync_module_states)
     return model

@@ -35,6 +35,9 @@ class WanT2V:
         dit_fsdp=False,
         use_usp=False,
         t5_cpu=False,
+        transfromer_dir = None,
+        lora_dir = None,
+        lora_alpha=32,
     ):
         r"""
         Initializes the Wan text-to-video generation model components.
@@ -65,7 +68,7 @@ class WanT2V:
         self.num_train_timesteps = config.num_train_timesteps
         self.param_dtype = config.param_dtype
 
-        shard_fn = partial(shard_model, device_id=device_id)
+        shard_fn = partial(shard_model, device_id=device_id,lora=(lora_dir is not None or lora_dir != ""))
         self.text_encoder = T5EncoderModel(
             text_len=config.text_len,
             dtype=config.t5_dtype,
@@ -84,44 +87,19 @@ class WanT2V:
         self.model = WanModel.from_pretrained(checkpoint_dir)
         self.model.eval().requires_grad_(False)
 
-        from safetensors import safe_open
-        def load_weights(weight_path, device="cpu"):
-            state_dict = {}
-            with safe_open(weight_path, framework="pt", device=device) as f:
-                for key in f.keys():
-                    state_dict[key] = f.get_tensor(key)
-            return state_dict
-        
-        STEP_DISTILL = False
-        CFG_DISTILL = True
-        self.cfg_distill = CFG_DISTILL
-        self.step_distill = STEP_DISTILL
+        logging.info(f"Creating WanModel from {checkpoint_dir}")
+        if transfromer_dir:
+            from scripts.train.model.model_cfg import WanModelCFG
+            self.model = WanModelCFG.from_pretrained(transfromer_dir)
+            logging.info(f"loaded transformer from {transfromer_dir}")
+        else:
+            self.model = WanModel.from_pretrained(checkpoint_dir)
+        self.model.eval().requires_grad_(False)   
 
-        if STEP_DISTILL or CFG_DISTILL:
-            # weight_path = "/vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp13_distill_cfg/checkpoint-400/diffusion_pytorch_model.safetensors"
-            weight_path = "/vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp14_distill_cfg_int/checkpoint-200/diffusion_pytorch_model.safetensors"
-            if not CFG_DISTILL:
-                state_dict = load_weights(weight_path)
-                result = self.model.load_state_dict(state_dict,strict=True)
-                if rank <= 0:
-                    print("Missing keys:", result.missing_keys)
-                    print("Unexpected keys:", result.unexpected_keys)
-                    print(f"STEP: load distill model success with cfg {weight_path}")
-                del state_dict
-            else:
-                from fastvideo.models.wan.modules.model_cfg import WanModelCFG
-                state_dict = load_weights(weight_path)
-                model_config = dict(self.model.config)
-                model_config["guidance_embed"] = True
-                transformer = WanModelCFG(**model_config)
-                result = transformer.load_state_dict(state_dict,strict=False)
-                del self.model
-                self.model = transformer
-                if rank <= 0:
-                    print("Missing keys:", result.missing_keys)
-                    print("Unexpected keys:", result.unexpected_keys)
-                    print(f"CFG: load distill model success {weight_path}")
-                del state_dict
+        if lora_dir:
+            from scripts.train.model.lora_utils import  load_lora_weights_manually    
+            self.model = load_lora_weights_manually(self.model, lora_dir,lora_alpha=lora_alpha)
+            logging.info(f"loaded lora from {lora_dir}")        
 
         if use_usp:
             from xfuser.core.distributed import \
@@ -238,11 +216,10 @@ class WanT2V:
         # evaluation mode
         with amp.autocast(dtype=self.param_dtype), torch.no_grad(), no_sync():
 
-            if self.step_distill: 
-                print(f"using euler solver")
-                sample_solver="euler"
+            # if self.step_distill: 
+            #     print(f"using euler solver")
+            #     sample_solver="euler"
             if sample_solver == 'unipc':
-                print(f"using unipc solver")
                 sample_scheduler = FlowUniPCMultistepScheduler(
                     num_train_timesteps=self.num_train_timesteps,
                     shift=1,
@@ -250,9 +227,6 @@ class WanT2V:
                 sample_scheduler.set_timesteps(
                     sampling_steps, device=self.device, shift=shift)
                 timesteps = sample_scheduler.timesteps
-                
-                print("timesteps xxx ==>>", timesteps)
-
             elif sample_solver == 'dpm++':
                 sample_scheduler = FlowDPMSolverMultistepScheduler(
                     num_train_timesteps=self.num_train_timesteps,
@@ -289,7 +263,7 @@ class WanT2V:
                 timestep = torch.stack(timestep)
 
                 self.model.to(self.device)
-                if not self.cfg_distill and guide_scale!=1:
+                if not hasattr(self.model,"guidance_embedding"):
                     noise_pred_cond = self.model(
                         latent_model_input, t=timestep, **arg_c)[0]
                     noise_pred_uncond = self.model(
@@ -297,8 +271,6 @@ class WanT2V:
 
                     noise_pred = noise_pred_uncond + guide_scale * (
                         noise_pred_cond - noise_pred_uncond)
-                elif guide_scale==1:
-                    noise_pred = self.model(latent_model_input, t=timestep, **arg_c)[0]
                 else:
                     guidance_tensor = torch.tensor([guide_scale*1000],
                                             device=latent_model_input[0].device,

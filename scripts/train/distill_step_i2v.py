@@ -125,7 +125,7 @@ def distill_one_step(
 
         timesteps_all = noise_scheduler.timesteps
          
-        index = torch.randint(0, 50 - 1, (bsz, ), device=model_input.device).long()
+        index = torch.randint(0, 50 - 6, (bsz, ), device=model_input.device).long()
         # print("timesteps ==>", timesteps_all.shape, index, )
         
         if sp_size > 1:
@@ -141,13 +141,13 @@ def distill_one_step(
         timesteps = timesteps_all[index]
 
         #timesteps_prev = (sigmas_prev * noise_scheduler.config.num_train_timesteps).view(-1)
-        timesteps_prev = timesteps_all[index + 1]
+        timesteps_prev = [timesteps_all[index + 1], timesteps_all[index + 2], timesteps_all[index + 3], timesteps_all[index + 4], timesteps_all[index + 5], timesteps_all[index + 6]]
 
 
         # noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
         noisy_model_input = noise_scheduler.add_noise(model_input, noise, timesteps)
 
-        main_print(f"timesteps {timesteps}, timesteps_prev {timesteps_prev}, index {index}")
+        # main_print(f"timesteps {timesteps}, timesteps_prev {timesteps_prev}, index {index}")
         guidance_tensor = torch.tensor([guidance_cfg*1000],
                                             device=noisy_model_input.device,
                                             dtype=torch.bfloat16)
@@ -190,21 +190,23 @@ def distill_one_step(
             x_prev = noise_scheduler.step(sample=noisy_model_input, model_output=teacher_output, timestep=timesteps,return_dict=False)[0]
 
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
-        with torch.no_grad():
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                x_prev_list = [x_prev.float()[i] for i in range(x_prev.size(0))]
-                # if ema_transformer is not None:
-                #     target_pred = ema_transformer(x_prev_list, timesteps_prev, None, max_seq_len, batch_context=encoder_hidden_states, context_mask=encoder_attention_mask)[0]
-                # else:
-                target_pred = teacher_transformer(x_prev_list,timesteps_prev,None,max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature)[0] #43200
+        for s in range(6):
+            with torch.no_grad():
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    x_prev_list = [x_prev.float()[i] for i in range(x_prev.size(0))]
+                    # if ema_transformer is not None:
+                    #     target_pred = ema_transformer(x_prev_list, timesteps_prev, None, max_seq_len, batch_context=encoder_hidden_states, context_mask=encoder_attention_mask)[0]
+                    # else:
+                    target_pred = teacher_transformer(x_prev_list,timesteps_prev[s],None,max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature)[0] #43200
 
-            noise_scheduler.lower_order_nums = 0
-            noise_scheduler.model_outputs = [None] * noise_scheduler.config.solver_order
-            noise_scheduler._step_index = int(index.item()) + 1
-            noise_scheduler.last_sample = None
-            target, target_prev = noise_scheduler.step(sample=x_prev, model_output=target_pred, timestep=timesteps_prev,return_dict=False)
-            # target, end_index = solver.euler_style_multiphase_pred(x_prev, target_pred, index, multiphase, True)
-            # target = noise_scheduler.convert_model_output(sample=x_prev, model_output=target_pred)
+                noise_scheduler.lower_order_nums = 0
+                noise_scheduler.model_outputs = [None] * noise_scheduler.config.solver_order
+                noise_scheduler._step_index = int(index.item()) + 1 + s
+                noise_scheduler.last_sample = None
+                target, target_prev = noise_scheduler.step(sample=x_prev, model_output=target_pred, timestep=timesteps_prev[s],return_dict=False)
+                x_prev = target
+                # target, end_index = solver.euler_style_multiphase_pred(x_prev, target_pred, index, multiphase, True)
+                # target = noise_scheduler.convert_model_output(sample=x_prev, model_output=target_pred)
 
 
         huber_c = 0.001
@@ -547,7 +549,7 @@ def main(args):
 
         if rank == 0:
             mid = int(args.cfg)
-            a = random.randint(mid-2,mid+5)
+            a = random.randint(mid-2,mid+3)
             # a = random.random() * (up_cfg - low_cfg) + low_cfg
             a_tensor = torch.tensor([a], dtype=torch.float32,device=device)
         else:

@@ -14,8 +14,8 @@ torchrun --nproc_per_node=$GPU_NUM --master-port 29512\
     --data_merge_path $DATA_MERGE_PATH \
     --num_frames 81 \
     --train_batch_size 1 \
-    --max_height 480 \
-    --max_width 832 \
+    --max_height 720 \
+    --max_width 1280 \
     --dataloader_num_workers 8 \
     --output_dir=$OUTPUT_DIR \
     --model_type $MODEL_TYPE \

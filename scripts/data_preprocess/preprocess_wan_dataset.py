@@ -78,6 +78,7 @@ def main(args):
                 img = data["img"][0]
                 h, lat_h = args.max_height, args.max_height // 8
                 w, lat_w = args.max_width, args.max_width // 8
+                assert lat_h == latents.size(2) and lat_w == latents.size(3)
                 msk = torch.ones(1, 81, lat_h, lat_w, device=device)
                 msk[:, 1:] = 0
                 msk = torch.concat([
