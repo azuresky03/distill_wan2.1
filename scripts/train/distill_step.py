@@ -22,31 +22,22 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
 
-from fastvideo.distill.solver import EulerSolver, extract_into_tensor
-from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
-from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 from fastvideo.utils.checkpoint import (resume_lora_optimizer, save_checkpoint, save_lora_checkpoint)
 from fastvideo.utils.communications import broadcast
 from scripts.train.util.hidden_communication_data_wrapper import sp_parallel_dataloader_wrapper
 from fastvideo.utils.dataset_utils import LengthGroupedSampler
 from fastvideo.utils.fsdp_util import (apply_fsdp_checkpointing, get_dit_fsdp_kwargs)
-from fastvideo.utils.load import load_transformer
 from fastvideo.utils.parallel_states import (destroy_sequence_parallel_group, get_sequence_parallel_state,
                                              initialize_sequence_parallel_state)
-from fastvideo.utils.validation import log_validation
-
 
 from scripts.dataset.hidden_datasets import (LatentDataset, latent_collate_function)
 from wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
-from wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from wan.utils.utils import cache_video, cache_image, str2bool
 
-from scripts.train.util.util import load_weights, load_wan
 from wan.utils.utils import cache_video
 from scripts.train.model.model_cfg import WanModelCFG, WanAttentionBlock
 
 from scripts.train.util.fm_solvers_unipc import FlowUniPCMultistepScheduler
-import numpy as np
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -81,7 +72,6 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
 
 def distill_one_step(
     transformer,
-    model_type,
     teacher_transformer,
     ema_transformer,
     optimizer,
@@ -96,18 +86,15 @@ def distill_one_step(
     num_euler_timesteps,
     multiphase,
     not_apply_cfg_solver,
-    distill_cfg,
     ema_decay,
     pred_decay_weight,
     pred_decay_type,
-    hunyuan_teacher_disable_cfg,
     guidance_cfg=0,
     null_encoded=None,
     max_seq_len=32760,
-    cfg_drop=False,
-    CFG_TYPE = 0,
     debug_save_dir = "",
     vae=None,
+    args=None,
 ):
     total_loss = 0.0
     optimizer.zero_grad()
@@ -119,30 +106,26 @@ def distill_one_step(
     }
     for _ in range(gradient_accumulation_steps):
         latents, encoder_hidden_states, attention_mask, encoder_attention_mask, y, clip_feature = next(loader)
+        if not args.i2v:
+            y, clip_feature = None, None
+
         model_input = latents # hunyuan like ??
         noise = torch.randn_like(model_input)
         bsz = model_input.shape[0]
 
         timesteps_all = noise_scheduler.timesteps
          
-        index = torch.randint(0, 50 - 6, (bsz, ), device=model_input.device).long()
-        # print("timesteps ==>", timesteps_all.shape, index, )
+        index = torch.randint(0, 50-args.k, (bsz, ), device=model_input.device).long()
         
         if sp_size > 1:
             broadcast(index)
             broadcast(noise)
-        # Add noise according to flow matching.
-        # sigmas = get_sigmas(start_timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
-        # sigmas = extract_into_tensor(noise_scheduler.sigmas, index, model_input.shape)
-        # sigmas_prev = extract_into_tensor(noise_scheduler.sigmas_prev, index, model_input.shape)
 
-        # timesteps = (sigmas * noise_scheduler.config.num_train_timesteps).view(-1)
         # if squeeze to [], unsqueeze to [1]
         timesteps = timesteps_all[index]
 
         #timesteps_prev = (sigmas_prev * noise_scheduler.config.num_train_timesteps).view(-1)
-        timesteps_prev = [timesteps_all[index + 1], timesteps_all[index + 2], timesteps_all[index + 3], timesteps_all[index + 4], timesteps_all[index + 5], timesteps_all[index + 6]]
-
+        timesteps_prev = [timesteps] + [timesteps_all[index+ ind + 1] for ind in range(args.k)]
 
         # noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
         noisy_model_input = noise_scheduler.add_noise(model_input, noise, timesteps)
@@ -156,65 +139,48 @@ def distill_one_step(
             x = [noisy_model_input[i] for i in range(noisy_model_input.size(0))]
             model_pred = transformer(x,timesteps,None,max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature)[0] #43200
 
-        # # if accelerator.is_main_process:
-        # main_print(f"index: {index} multiphase: {multiphase}")
-        # model_pred, end_index = solver.euler_style_multiphase_pred(noisy_model_input, model_pred, index, multiphase)
         model_pred_org = model_pred.clone()
-        # if accelerator.is_main_process:
         noise_scheduler.model_outputs = [None] * noise_scheduler.config.solver_order
         noise_scheduler.lower_order_nums = 0
         noise_scheduler._step_index = int(index.item())
         noise_scheduler.last_sample = None
-        # model_pred = noise_scheduler.convert_model_output(sample=noisy_model_input, model_output=model_pred)
-        model_pred, model_pred_prev = noise_scheduler.step(sample=noisy_model_input, model_output=model_pred, timestep=timesteps,return_dict=False)
-
-
-        ## save video
-
-        '''
-        guidance_tensor = torch.tensor([guide_scale*1000],
-                                            device=latent_model_input[0].device,
-                                            dtype=torch.bfloat16)
-        noise_pred = self.model(latent_model_input, t=timestep,context=context,seq_len=seq_len,guidance=guidance_tensor)[0]
-        '''
+        model_pred_prev, model_pred_x0 = noise_scheduler.step(sample=noisy_model_input, model_output=model_pred, timestep=timesteps,return_dict=False)
 
         with torch.no_grad():
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                teacher_output = teacher_transformer(x,timesteps,None,max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature)[0].float()
-            
-            # x_prev = solver.euler_step(noisy_model_input, teacher_output, index)
-            noise_scheduler.lower_order_nums = 0
-            noise_scheduler.model_outputs = [None] * noise_scheduler.config.solver_order
-            noise_scheduler._step_index = int(index.item())
-            noise_scheduler.last_sample = None
-            x_prev = noise_scheduler.step(sample=noisy_model_input, model_output=teacher_output, timestep=timesteps,return_dict=False)[0]
-
-        # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
-        for s in range(1):
-            with torch.no_grad():
+            x_prev = x
+            for ind in range(args.k):
+                timesteps = timesteps_prev[ind]
                 with torch.autocast("cuda", dtype=torch.bfloat16):
-                    x_prev_list = [x_prev.float()[i] for i in range(x_prev.size(0))]
-                    # if ema_transformer is not None:
-                    #     target_pred = ema_transformer(x_prev_list, timesteps_prev, None, max_seq_len, batch_context=encoder_hidden_states, context_mask=encoder_attention_mask)[0]
-                    # else:
-                    target_pred = teacher_transformer(x_prev_list,timesteps_prev[s],None,max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature)[0] #43200
-
+                    teacher_output = teacher_transformer(x_prev,timesteps,None,max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature)[0].float()
+                
+                # x_prev = solver.euler_step(noisy_model_input, teacher_output, index)
                 noise_scheduler.lower_order_nums = 0
                 noise_scheduler.model_outputs = [None] * noise_scheduler.config.solver_order
-                noise_scheduler._step_index = int(index.item()) + 1 + s
+                noise_scheduler._step_index = int(index.item()) + ind
                 noise_scheduler.last_sample = None
-                target, target_prev = noise_scheduler.step(sample=x_prev, model_output=target_pred, timestep=timesteps_prev[s],return_dict=False)
-                x_prev = target
-                # target, end_index = solver.euler_style_multiphase_pred(x_prev, target_pred, index, multiphase, True)
-                # target = noise_scheduler.convert_model_output(sample=x_prev, model_output=target_pred)
+                x_prev = noise_scheduler.step(sample=torch.stack(x_prev), model_output=teacher_output, timestep=timesteps,return_dict=False)[0]
+                x_prev = [x_prev[i] for i in range(x_prev.size(0))]
 
+        # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
+        with torch.no_grad():
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                if ema_transformer is not None:
+                    target_pred = ema_transformer(x_prev, timesteps_prev[-1], None, max_seq_len, batch_context=encoder_hidden_states, context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature)[0]
+                else:
+                    target_pred = teacher_transformer(x_prev,timesteps_prev[-1],None,max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature)[0]
+
+            noise_scheduler.lower_order_nums = 0
+            noise_scheduler.model_outputs = [None] * noise_scheduler.config.solver_order
+            noise_scheduler._step_index = int(index.item()) + args.k
+            noise_scheduler.last_sample = None
+            target_prev, traget_x0 = noise_scheduler.step(sample=torch.stack(x_prev), model_output=target_pred, timestep=timesteps_prev[-1],return_dict=False)
 
         huber_c = 0.001
         # loss = loss.mean()
-        loss = (torch.mean(torch.sqrt((model_pred.float() - target.float())**2 + huber_c**2) - huber_c) /
+        loss = (torch.mean(torch.sqrt((model_pred_x0.float() - traget_x0.float())**2 + huber_c**2) - huber_c) /
                 gradient_accumulation_steps)
-        loss += (torch.mean(torch.sqrt((model_pred_prev.float() - target_prev.float())**2 + huber_c**2) - huber_c) /
-                gradient_accumulation_steps)
+        # loss += (torch.mean(torch.sqrt((model_pred_prev.float() - target_prev.float())**2 + huber_c**2) - huber_c) /
+        #         gradient_accumulation_steps)
         
         if pred_decay_weight > 0:
             if pred_decay_type == "l1":
@@ -304,34 +270,13 @@ def main(args):
         self.sigmas_prev = torch.from_numpy(self.sigmas_prev)
     '''
 
-    main_print(f"--> loading model from {args.ckpt_dir}")
+    main_print(f"--> loading model from {args.resume_from_weight}")
 
     cfg = WAN_CONFIGS[args.task]
 
-    # old_transformer = load_wan(
-    #     config=cfg,
-    #     checkpoint_dir=args.ckpt_dir,
-    #     device_id=device,
-    #     rank=rank,
-    # )
-    # state_dict = load_weights(args.resume_from_weight)
-    # model_config = dict(old_transformer.config)
-    # model_config["guidance_embed"] = True
-    # transformer = WanModelCFG(**model_config)
-    # result = transformer.load_state_dict(state_dict,strict=False)
-    # if rank <= 0:
-    #     print("Missing keys:", result.missing_keys)
-    #     print("Unexpected keys:", result.unexpected_keys)
-    #     print(f"CFG: load student distill model success {args.resume_from_weight}")
     transformer = WanModelCFG.from_pretrained(args.resume_from_weight).train()
     transformer.requires_grad_(True)
 
-    # teacher_transformer = WanModelCFG(**model_config)
-    # result = teacher_transformer.load_state_dict(state_dict,strict=False)
-    # if rank <= 0:
-    #     print("Missing keys:", result.missing_keys)
-    #     print("Unexpected keys:", result.unexpected_keys)
-    #     print(f"CFG: load teacher distill model success {args.resume_from_weight}")
     teacher_transformer = WanModelCFG.from_pretrained(args.resume_from_weight)
     teacher_transformer.requires_grad_(False)
     if args.use_ema:
@@ -339,7 +284,6 @@ def main(args):
     else:
         ema_transformer = None
     
-    # del state_dict, old_transformer
     torch.cuda.empty_cache()
     main_print(
         f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
@@ -378,7 +322,7 @@ def main(args):
     if args.use_ema:
         ema_transformer.requires_grad_(False)
 
-    DEBUG = False
+    DEBUG = args.debug
     if DEBUG:
         from wan.modules.vae import WanVAE
         vae = WanVAE(vae_pth="/vepfs-zulution/models/Wan2.1-T2V-14B/Wan2.1_VAE.pth")
@@ -390,43 +334,13 @@ def main(args):
     else:
         vae = None
 
-    # noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=args.shift)
-    # if args.scheduler_type == "pcm_linear_quadratic":
-    #     linear_steps = int(noise_scheduler.config.num_train_timesteps * args.linear_range)
-    #     sigmas = linear_quadratic_schedule(
-    #         noise_scheduler.config.num_train_timesteps,
-    #         args.linear_quadratic_threshold,
-    #         linear_steps,
-    #     )
-    #     sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
-    # else:
-    #     sigmas = noise_scheduler.sigmas
-    # args.shift = 
     noise_scheduler = FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=1)
-    # sigmas = np.array(noise_scheduler.sigmas)
-    
-    euler_timesteps = 50 #args.num_euler_timesteps
-    # # step_ratio = noise_scheduler.config.num_train_timesteps // euler_timesteps
-    # # euler_timesteps = (np.arange(1, euler_timesteps + 1) * step_ratio).round().astype(np.int64) - 1
-    # # new_sigmas = sigmas[euler_timesteps]
 
-    # sigmas_prev = np.asarray([sigmas[0]] + sigmas[euler_timesteps[:-1]].tolist())
-
-    # noise_scheduler.sigmas = torch.from_numpy(new_sigmas).to(device)
-    # noise_scheduler.sigmas_prev = torch.from_numpy(sigmas_prev).to(device)
-    noise_scheduler.num_inference_steps = 50 #50 #-1e6
-    noise_scheduler.set_timesteps(50, device=device, shift=args.shift)
+    noise_scheduler.num_inference_steps = args.interval_steps
+    noise_scheduler.set_timesteps(args.interval_steps, device=device, shift=args.shift)
 
     timesteps = noise_scheduler.timesteps
-    print("ssss ==>> timesteps:", timesteps)
-
-
-    # solver = EulerSolver(
-    #     sigmas.numpy()[::-1],
-    #     noise_scheduler.config.num_train_timesteps,
-    #     euler_timesteps=args.num_euler_timesteps,
-    # )
-    # solver.to(device)
+    main_print(f"noise_scheduler timesteps: {timesteps}")
 
     params_to_optimize = transformer.parameters()
     params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
@@ -472,10 +386,6 @@ def main(args):
     num_update_steps_per_epoch = math.ceil(
         len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
-
-    # if rank <= 0:
-    #     project = args.tracker_project_name or "fastvideo"
-    #     wandb.init(project=project, config=args)
 
     # Train!
     total_batch_size = (world_size * args.gradient_accumulation_steps / args.sp_size * args.train_sp_batch_size)
@@ -564,7 +474,6 @@ def main(args):
         main_print(f"guidance_cfg: {guidance_cfg}")
         loss, grad_norm, pred_norm = distill_one_step(
             transformer,
-            args.model_type,
             teacher_transformer,
             ema_transformer,
             optimizer,
@@ -579,18 +488,15 @@ def main(args):
             args.num_euler_timesteps,
             num_phases,
             args.not_apply_cfg_solver,
-            args.distill_cfg,
             args.ema_decay,
             args.pred_decay_weight,
             args.pred_decay_type,
-            args.hunyuan_teacher_disable_cfg,
             guidance_cfg,
             null_encoded,
             args.max_seq_len,
-            step%10==11,
-            CFG_TYPE=args.cfg_type,
             debug_save_dir=debug_save_dir,
-            vae=vae
+            vae=vae,
+            args=args
         )
 
         step_time = time.time() - start_time
@@ -647,13 +553,8 @@ def get_args():
 
     ###orginal training arguments
 
-    parser.add_argument("--model_type", type=str, default="mochi", help="The type of model to train.")
-
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
-    parser.add_argument("--num_height", type=int, default=480)
-    parser.add_argument("--num_width", type=int, default=848)
-    parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument(
         "--dataloader_num_workers",
         type=int,
@@ -671,17 +572,13 @@ def get_args():
     parser.add_argument("--group_resolution", action="store_true")  # TODO
 
     # text encoder & vae & diffusion model
-    parser.add_argument("--pretrained_model_name_or_path", type=str)
-    parser.add_argument("--dit_model_name_or_path", type=str)
-    parser.add_argument("--cache_dir", type=str, default="./cache_dir")
 
     # diffusion setting
     parser.add_argument("--ema_decay", type=float, default=0.95)
     parser.add_argument("--ema_start_step", type=int, default=0)
-    parser.add_argument("--cfg", type=float, default=0.1)
+    parser.add_argument("--cfg", type=float, default=5)
 
     # validation & logs
-    parser.add_argument("--validation_prompt_dir", type=str)
     parser.add_argument("--validation_sampling_steps", type=str, default="64")
     parser.add_argument("--validation_guidance_scale", type=str, default="4.5")
 
@@ -837,7 +734,6 @@ def get_args():
         action="store_true",
         help="Whether to apply the cfg_solver.",
     )
-    parser.add_argument("--distill_cfg", type=float, default=3.0, help="Distillation coefficient.")
     # ["euler_linear_quadratic", "pcm", "pcm_linear_qudratic"]
     parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
     parser.add_argument(
@@ -853,17 +749,20 @@ def get_args():
         help="Range for linear quadratic scheduler.",
     )
     parser.add_argument("--weight_decay", type=float, default=0.001, help="Weight decay to apply.")
-    parser.add_argument("--use_ema", default=False, help="Whether to use EMA.")
+    parser.add_argument("--use_ema", default=False, help="Whether to use EMA.",action="store_true")
     parser.add_argument("--multi_phased_distill_schedule", type=str, default=None)
     parser.add_argument("--pred_decay_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_type", default="l1")
-    parser.add_argument("--hunyuan_teacher_disable_cfg", action="store_true")
     parser.add_argument(
         "--master_weight_type",
         type=str,
         default="fp32",
         help="Weight type to use - fp32 or bf16.",
     )
+    parser.add_argument("--debug",action="store_true",default=False)
+    parser.add_argument("--i2v",action="store_true",default=False)
+    parser.add_argument("--k",type=int,default=1)
+    parser.add_argument("--interval_steps",type=int,default=50)
     args = parser.parse_args()
 
     return args

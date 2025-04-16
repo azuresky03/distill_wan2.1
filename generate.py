@@ -299,12 +299,23 @@ def generate(args):
             logging.info(f"Extended prompt: {args.prompt}")
 
         logging.info("Creating WanT2V pipeline.")
-        # args.size, size_name = "832*480", "480p"
-        args.size, size_name = "1280*720", "720p"
-        lora_alpha = 32
-        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/exp_results/exp2.9/{size_name}_{lora_alpha}"
-        transfromer_dir = "/cv/wangxuekuan/exp_models/distill/wanx-t2v/s5_exp0/checkpoint-1000"
-        lora_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/outputs/exp2.9/checkpoint-400"
+        args.size, size_name = "832*480", "480p"
+        # args.size, size_name = "1280*720", "720p"
+        check_point_step = 100
+
+        ckp_dir = ""
+        lora_dir = ""
+
+        # lora_alpha = 32
+        # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/exp_results/exp4.3/{check_point_step}_{size_name}_{lora_alpha}"
+        # transfromer_dir = "/cv/wangxuekuan/exp_models/distill/wanx-t2v/s5_exp0/checkpoint-1000"
+        # ckp_dir = "/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0409_1448|26/checkpoint_model_000499/feedforward.bin"
+        # lora_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/outputs/exp4.3/checkpoint-{check_point_step}"
+
+        transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp20_cd_t2v_720/checkpoint-{check_point_step}"
+        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/exp20_cd_t2v_720/{check_point_step}_{size_name}"
+        lora_alpha = None
+        lora_dir = ""
         wan_t2v = wan.WanT2V(
             config=cfg,
             checkpoint_dir=args.ckpt_dir,
@@ -317,17 +328,18 @@ def generate(args):
             transfromer_dir=transfromer_dir,
             lora_dir=lora_dir,
             lora_alpha=lora_alpha,
+            ckp_dir=ckp_dir,
         )
 
         logging.info(
             f"Generating {'image' if 't2i' in args.task else 'video'} ...")
         # for size in SIZE_CONFIGS.values():
-        test_file = "/vepfs-zulution/zhangpengpeng/cv/video_generation/HunyuanVideo/test_prompts.txt"
+        test_file = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/test_prompts.txt"
         with open(test_file, "r") as f:
             lines = f.readlines()
         for guidance in [8]:
-            for i in range(20):
-                for shift,step in [(13,7)]:
+            for i in range(4):
+                for shift,step in [(10,10),(15,5)]:
                     # if i > 8:
                     #     continue
                     line = lines[i]
@@ -345,7 +357,7 @@ def generate(args):
                         sample_solver=args.sample_solver,
                         sampling_steps=args.sample_steps,
                         guide_scale=args.sample_guide_scale,
-                        seed=args.base_seed,
+                        seed=args.base_seed+shift+guidance,
                         offload_model=args.offload_model)
 
                     if rank == 0:
@@ -410,8 +422,9 @@ def generate(args):
             args.prompt = input_prompt[0]
             logging.info(f"Extended prompt: {args.prompt}")
 
+        ckp_step = 500
         transfromer_dir = ""
-        transfromer_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp18_distill_step_i2v_7/checkpoint-350"
+        transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp19_distill_step_i2v_7/checkpoint-{ckp_step}"
         logging.info("Creating WanI2V pipeline.")
         wan_i2v = wan.WanI2V(
             config=cfg,
@@ -426,11 +439,11 @@ def generate(args):
         )
 
         logging.info("Generating video ...")
-        args.sample_steps = 15
+        args.sample_steps = 7
         
         # args.size, size_name = "480*832", "480p"
         args.size, size_name = "1280*720", "720p"
-        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/exp18_i2v_step_7/350_{size_name}_prompts"
+        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/exp19_step_i2v_15_to_7/{ckp_step}_{size_name}_prompts"
         prompts_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/examples/i2v/"
         with open(prompts_dir+"all.txt", "r") as f:
             lines = f.readlines()
@@ -438,8 +451,8 @@ def generate(args):
             logging.info(f"prompt: {prompt}, image: {image_dir}")
             img = Image.open(prompts_dir+image_dir).convert("RGB")
             args.prompt = prompt
-            for guidance in [5,8]:
-                for shift in [10,13]:
+            for guidance in [8]:
+                for shift in [10,15]:
                     args.sample_shift = shift
                     args.sample_guide_scale = guidance
                     video = wan_i2v.generate(

@@ -38,6 +38,7 @@ class WanT2V:
         transfromer_dir = None,
         lora_dir = None,
         lora_alpha=32,
+        ckp_dir = None,
     ):
         r"""
         Initializes the Wan text-to-video generation model components.
@@ -84,10 +85,6 @@ class WanT2V:
             device=self.device)
 
         logging.info(f"Creating WanModel from {checkpoint_dir}")
-        self.model = WanModel.from_pretrained(checkpoint_dir)
-        self.model.eval().requires_grad_(False)
-
-        logging.info(f"Creating WanModel from {checkpoint_dir}")
         if transfromer_dir:
             from scripts.train.model.model_cfg import WanModelCFG
             self.model = WanModelCFG.from_pretrained(transfromer_dir)
@@ -95,6 +92,10 @@ class WanT2V:
         else:
             self.model = WanModel.from_pretrained(checkpoint_dir)
         self.model.eval().requires_grad_(False)   
+
+        if ckp_dir:
+            self.model.load_state_dict(torch.load(ckp_dir, map_location=self.device,weights_only=True))
+            logging.info(f"加载额外检查点: {ckp_dir}")
 
         if lora_dir:
             from scripts.train.model.lora_utils import  load_lora_weights_manually    

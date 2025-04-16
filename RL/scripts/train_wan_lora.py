@@ -32,9 +32,15 @@ from safetensors.torch import save_file
 from wan.utils.utils import cache_video
 from peft import PeftModel
 from fastvideo.utils.parallel_states import nccl_info
+from fastvideo.utils.checkpoint import save_checkpoint as save_checkpoint_full
 
-def save_checkpoint(model, optimizer, scheduler, save_path, step, rank):
+def save_checkpoint(model, optimizer, scheduler, save_path, step, rank, lora=True):
     """保存FSDP+PEFT模型的完整检查点"""
+
+    if not lora:
+        save_checkpoint_full(model,rank,save_path,step)
+        return
+
     if rank == 0:
         os.makedirs(save_path, exist_ok=True)
         os.makedirs(f"{save_path}/checkpoint-{step}", exist_ok=True)
@@ -107,7 +113,7 @@ def create_distributed_tqdm(iterable=None, desc=None, total=None, disable=False,
     # 只在主进程(rank=0)上显示进度条
     return tqdm(iterable, desc=desc, total=total, disable=(rank != 0) or disable, **kwargs)
 
-def get_lora_parameters(model,rank):
+def get_parameters(model,rank):
     """
     筛选出模型中的LoRA参数
     """
@@ -115,11 +121,8 @@ def get_lora_parameters(model,rank):
     non_lora_params = []
     
     for name, param in model.named_parameters():
-        if 'lora_' in name or param.requires_grad:
-            if 'lora_' not in name:
-                print(f"requires_grad参数: {name}, rank: {rank}")
-            else:
-                lora_params.append(param)
+        if param.requires_grad:
+            lora_params.append(param)
         else:
             non_lora_params.append(param)
     
@@ -129,11 +132,11 @@ def create_optimizer_and_scheduler(model, lr, weight_decay, num_train_steps,rank
     """
     创建针对LoRA参数的优化器和学习率调度器
     """
-    lora_params, _ = get_lora_parameters(model,rank)
+    lora_params, _ = get_parameters(model,rank)
     
     # 打印LoRA参数的数量，便于调试
     total_params = sum(p.numel() for p in lora_params)
-    print(f"LoRA参数总量: {total_params / 1e6:.2f}M rank: {rank}")
+    print(f"参数总量: {total_params / 1e6:.2f}M rank: {rank}")
     
     # 创建优化器，只优化LoRA参数
     optimizer = AdamW(lora_params, lr=lr, weight_decay=weight_decay, eps=1e-10)
@@ -188,6 +191,8 @@ class WanLoraTrainer:
         dist.init_process_group("nccl")
         torch.cuda.set_device(self.local_rank)
         self.device = torch.cuda.current_device()
+        initialize_sequence_parallel_state(args.sp_size)
+        self.sp_size = args.sp_size
 
         # 设置随机种子
         if args.seed is not None:
@@ -265,25 +270,38 @@ class WanLoraTrainer:
     def _setup_model(self):
         """设置Wan模型和LoRA"""
         self.model = WanModelCFG.from_pretrained(self.args.transfromer_dir)
-        if self.args.resume_from_checkpoint:
-            self.model = load_lora_weights_manually(self.model, self.args.resume_from_checkpoint)
-            self.step = self.init_steps = int(self.args.resume_from_checkpoint.split("-")[-1])+1
-            main_print(f"从检查点恢复训练, 步骤: {self.step}")
+
+        if self.args.extra_ckpt:
+            self.model.load_state_dict(torch.load(self.args.extra_ckpt, map_location=f'cuda:{self.device}',weights_only=True))
+            main_print(f"加载额外检查点: {self.args.extra_ckpt}")
+
+        if self.args.no_cfg_distill:
+            self.model.guidance_embedding = None
+        if not self.args.full_param:
+            self.model.eval()
+            if self.args.resume_from_checkpoint:
+                self.model = load_lora_weights_manually(self.model, self.args.resume_from_checkpoint)
+                self.step = self.init_steps = int(self.args.resume_from_checkpoint.split("-")[-1])+1
+                main_print(f"从检查点恢复训练, 步骤: {self.step}")
+            else:
+                self.model = create_wan_lora_model(
+                    self.model,
+                    lora_rank=self.args.lora_rank,
+                    lora_alpha=self.args.lora_alpha
+                )
         else:
-            self.model = create_wan_lora_model(
-                self.model,
-                lora_rank=self.args.lora_rank,
-                lora_alpha=self.args.lora_alpha
-            )
+            self.model.train()
+            self.model.requires_grad_(True)
         
         self.model = self.model.to(self.device).to(self.autocast_type)
 
-        count = 0
-        for name, param in self.model.named_parameters():
-            if 'lora_' in name and param.requires_grad:
-                dist.broadcast(param.data, src=0)
-                count += 1
-        main_print(f"broadcast 统一 LoRA参数数量: {count}")
+        if not self.args.full_param:
+            count = 0
+            for name, param in self.model.named_parameters():
+                if 'lora_' in name and param.requires_grad:
+                    dist.broadcast(param.data, src=0)
+                    count += 1
+            main_print(f"broadcast 统一 LoRA参数数量: {count}")
 
         dist.barrier()
         
@@ -300,7 +318,7 @@ class WanLoraTrainer:
 
         self.model = FSDP(
             self.model,
-            use_orig_params=True,
+            use_orig_params= not self.args.full_param,
             **fsdp_kwargs,
         )
 
@@ -358,10 +376,43 @@ class WanLoraTrainer:
         # 设置损失函数
         self.loss_fn = getattr(reward_fn, self.args.reward_fn)(device="cpu", dtype=self.autocast_type, **self.reward_fn_kwargs)
 
-    def one_diffusion(self, train_prompt,backprop_step_list, eval=False):
+    def one_diffusion(self, train_prompt, backprop_step_list, eval=False):
         """执行一次完整的扩散过程"""
 
         self.noise_scheduler.set_timesteps(self.args.sample_steps, device=self.device, shift=self.args.shift)
+
+        # 确保组内所有卡使用相同的prompt
+        if self.sp_size > 1 and not eval:
+            # 获取当前组的根节点ID
+            group_root = nccl_info.group_id * nccl_info.sp_size
+            
+            if isinstance(train_prompt, list):
+                # 如果是列表形式的prompt，需要将每个字符串张量化后广播
+                broadcast_prompts = []
+                for i, prompt in enumerate(train_prompt):
+                    # 将字符串转为byte tensor进行广播
+                    if self.rank == group_root:
+                        prompt_bytes = torch.tensor(bytearray(prompt.encode('utf-8')), dtype=torch.uint8, device=self.device)
+                        prompt_size = torch.tensor([len(prompt_bytes)], dtype=torch.long, device=self.device)
+                    else:
+                        prompt_size = torch.tensor([0], dtype=torch.long, device=self.device)
+                        
+                    # 广播大小
+                    dist.broadcast(prompt_size, src=group_root, group=nccl_info.group)
+                    
+                    if self.rank != group_root:
+                        prompt_bytes = torch.zeros(prompt_size.item(), dtype=torch.uint8, device=self.device)
+                    
+                    # 广播内容
+                    dist.broadcast(prompt_bytes, src=group_root, group=nccl_info.group)
+                    
+                    # 解码回字符串
+                    if self.rank != group_root:
+                        prompt = bytes(prompt_bytes.cpu().numpy().tolist()).decode('utf-8')
+                    
+                    broadcast_prompts.append(prompt)
+                
+                train_prompt = broadcast_prompts
 
         with torch.no_grad():
             if self.args.t5_on_cpu:
@@ -373,7 +424,7 @@ class WanLoraTrainer:
                 torch.cuda.empty_cache()  
             else:
                 context = self.text_encoder(train_prompt, self.device)
-        
+
         if self.args.debug: 
             main_print(f"after t5 显存占用 {torch.cuda.max_memory_reserved(self.device) / 1024**3 } GB")
 
@@ -526,7 +577,7 @@ class WanLoraTrainer:
                     main_print(f"保存检查点 步骤 {step}")
                     
                     self.evaluate()
-                    save_checkpoint(self.model, self.optimizer, self.scheduler, self.args.output_dir, step, self.rank)
+                    save_checkpoint(self.model, self.optimizer, self.scheduler, self.args.output_dir, step, self.rank,not self.args.full_param)
                     dist.barrier()
                 
                 torch.cuda.empty_cache()  
@@ -535,7 +586,7 @@ class WanLoraTrainer:
             # 训练结束，保存最终模型
             if self.rank == 0:
                 main_print("保存最终模型")
-            save_checkpoint(self.model, self.optimizer, self.scheduler, self.args.output_dir, step, self.rank)
+            save_checkpoint(self.model, self.optimizer, self.scheduler, self.args.output_dir, step, self.rank, not self.args.full_param)
             dist.barrier()
     
     def evaluate(self):
@@ -568,6 +619,9 @@ def get_args():
     parser.add_argument("--shift", type=int, default=1, help="Shift value for noise scheduler.")
     parser.add_argument("--train_batch_size", type=int, required=True, help="Training batch size.")
     parser.add_argument("--num_train_steps", type=int, default=1000, help="Number of training steps.")
+
+    parser.add_argument("--full_param", action="store_true")
+    parser.add_argument("--extra_ckpt", type=str, default=None)
 
     # 添加优化器相关参数
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for LoRA parameters.")
