@@ -39,4 +39,6 @@ torchrun --nnodes 1 --nproc_per_node 8 --master-port 29516\
     --not_apply_cfg_solver \
     --use_cpu_offload \
     --use_ema \
+    --k 1 \
+    --interval_steps 10 \
     --i2v

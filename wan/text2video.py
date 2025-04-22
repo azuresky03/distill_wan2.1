@@ -219,7 +219,7 @@ class WanT2V:
 
             # if self.step_distill: 
             #     print(f"using euler solver")
-            #     sample_solver="euler"
+            # sample_solver="euler"
             if sample_solver == 'unipc':
                 sample_scheduler = FlowUniPCMultistepScheduler(
                     num_train_timesteps=self.num_train_timesteps,
