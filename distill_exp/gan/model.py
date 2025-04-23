@@ -192,15 +192,13 @@ class WanExtractor(WanModelCFG):
             freqs=self.freqs,
             context=context,
             context_lens=context_lens)
+        
+        x = torch.chunk(x, nccl_info.sp_size, dim=1)[nccl_info.rank_within_group]
 
-        print(f"in exractor before block, rank {dist.get_rank()}, x shape: {x.shape}")
-        if dist.get_rank()==0:
-            print(self.blocks[0])
         for block in self.blocks:
             x = block(x, **kwargs)
 
         if get_sequence_parallel_state():
-            print(f"rank{torch.distributed.get_rank()} in exractor, all_gather x{x.shape}")
             x = all_gather(x,dim=1).contiguous()
 
         # head

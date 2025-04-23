@@ -420,10 +420,7 @@ class DistillTrainer:
             assert a_tensor[0].item() > 0
             guidance_cfg = a_tensor[0].item()
             
-            main_print(f"guidance_cfg: {guidance_cfg}")
-            
             torch.cuda.empty_cache()
-            main_print(f"memory before step: {torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024} GB")
 
             # 执行一步训练
             loss, grad_norm, pred_norm = self.step(
@@ -435,8 +432,11 @@ class DistillTrainer:
             )
 
             torch.cuda.empty_cache()
-            main_print(f"memory after step: {torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024} GB")
-            gan_loss = self.gan_step(self.dataloader, guidance_cfg, args=self.args)
+
+            if self.args.gan:
+                gan_loss = self.gan_step(self.dataloader, guidance_cfg, args=self.args)
+            else:
+                gan_loss = 0.0
             
             # 计算步骤时间
             step_time = time.time() - start_time
@@ -570,6 +570,7 @@ class DistillTrainer:
             #         gradient_accumulation_steps)
 
             if self.gan:
+                main_print(f"cd loss: {loss.item():.2e} gan_loss: {gan_loss.item() * self.args.gan_loss_weight:.2e}")
                 loss += gan_loss * self.args.gan_loss_weight / self.gradient_accumulation_steps
             
             if self.pred_decay_weight > 0:
@@ -641,7 +642,7 @@ class DistillTrainer:
 
             timesteps_all = self.noise_scheduler.timesteps
              
-            index = torch.randint(0,int(args.interval_steps*args.gan_max_noise_ratio)-1, (bsz, ), device=model_input.device).long()
+            index = torch.randint(int(args.interval_steps*(1-args.gan_max_noise_ratio)),args.interval_steps-1, (bsz, ), device=model_input.device).long()
             
             if self.sp_size > 1:
                 broadcast(index)
@@ -661,7 +662,7 @@ class DistillTrainer:
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 x = [noisy_model_input[i] for i in range(noisy_model_input.size(0))]
                 with torch.no_grad():
-                    model_pred, mid_features = self.transformer(x,timesteps,None,self.max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature,cls=self.args.gan,cls_layers=self.layer_idxs)
+                    model_pred, _ = self.transformer(x,timesteps,None,self.max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature,cls=self.args.gan,cls_layers=self.layer_idxs)
                 model_pred = model_pred[0]
 
                 # self.gan.requires_grad_(True)
@@ -675,18 +676,31 @@ class DistillTrainer:
             self.noise_scheduler.last_sample = None
             model_pred_prev, model_pred_x0 = self.noise_scheduler.step(sample=noisy_model_input, model_output=model_pred, timestep=timesteps,return_dict=False)
 
-            noisy_model_input = self.noise_scheduler.add_noise(model_pred_x0, noise, timesteps)
+            noisy_model_input_fake = self.noise_scheduler.add_noise(model_pred_x0, noise, timesteps)
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                x = [noisy_model_input[i] for i in range(noisy_model_input.size(0))]
+                x_fake = [noisy_model_input_fake[i] for i in range(noisy_model_input_fake.size(0))]
                 with torch.no_grad():
-                    model_pred_fake, mid_features_fake = self.transformer(x,timesteps,None,self.max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature,cls=self.args.gan,cls_layers=self.layer_idxs)
+                    model_pred_fake, mid_features_fake = self.transformer(x_fake,timesteps,None,self.max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature,cls=self.args.gan,cls_layers=self.layer_idxs)
                 self.gan.requires_grad_(True)
                 logit = self.gan(mid_features_fake, timesteps, encoder_hidden_states, self.max_seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_feature)
             fake_labels = torch.zeros_like(logit, device=self.device, dtype=torch.bfloat16)
             gan_fake_loss = self.gan_criterion(logit, fake_labels)
+            gan_fake_loss.backward()
 
-            loss = gan_fake_loss
-            loss.backward()
+            model = self.ema_transformer if self.args.use_ema else self.teacher_transformer
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                with torch.no_grad():
+                    model_pred, mid_features_true = model(x,timesteps,None,self.max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature,cls=self.args.gan,cls_layers=self.layer_idxs)
+                model_pred = model_pred[0]
+
+                self.gan.requires_grad_(True)
+                logit = self.gan(mid_features_true, timesteps, encoder_hidden_states, self.max_seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_feature)
+            true_labels = torch.ones_like(logit, device=self.device, dtype=torch.bfloat16)
+            gan_true_loss = self.gan_criterion(logit, true_labels)
+            gan_true_loss.backward()
+
+            main_print(f"gan_fake_loss: {gan_fake_loss.item():.4f}, gan_true_loss: {gan_true_loss.item():.4f}")
+            loss = (gan_fake_loss + gan_true_loss) / 2
 
             avg_loss = loss.detach().clone()
             dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
@@ -948,7 +962,7 @@ def get_args():
     parser.add_argument(
         "--gan_learning_rate",
         type=float,
-        default=1e-4,
+        default=1e-5,
         help="Learning rate for GAN model.",
     )
     parser.add_argument(

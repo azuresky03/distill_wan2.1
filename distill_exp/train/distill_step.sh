@@ -26,7 +26,7 @@ torchrun --nnodes 1 --nproc_per_node 8 --master-port 29516\
     --sp_size 8 \
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
-    --gradient_accumulation_steps=1\
+    --gradient_accumulation_steps 2\
     --max_train_steps 1000\
     --learning_rate=1e-6 \
     --mixed_precision="bf16"\
@@ -42,4 +42,4 @@ torchrun --nnodes 1 --nproc_per_node 8 --master-port 29516\
     --k 1 \
     --interval_steps 10 \
     --gan \
-    --gan_path /cv/zhangpengpeng/cv/video_generation/Wan2.1/output/gan/exp0/checkpoints/best.pth
+    # --gan_path /cv/zhangpengpeng/cv/video_generation/Wan2.1/output/gan/exp0/checkpoints/best.pth
