@@ -3,15 +3,15 @@ import torch.amp as amp
 import torch.nn as nn
 import torch.distributed as dist
 import torch.utils.checkpoint as checkpoint
-# from  distill_exp.gan.model_cfg import WanModelCFG, sinusoidal_embedding_1d
-from wan.modules.model import WanModel, sinusoidal_embedding_1d
+from  distill_exp.gan.model_cfg import WanModelCFG, sinusoidal_embedding_1d
+# from wan.modules.model import WanModel, sinusoidal_embedding_1d
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from distill_exp.gan.self_attention import SelfAttention
 
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 
-class WanExtractor(WanModel):
+class WanExtractor(WanModelCFG):
     r"""
     Wanmin diffusion backbone with only 2 attention blocks, inheriting from Wan model.
     """
@@ -193,27 +193,15 @@ class WanExtractor(WanModel):
             context=context,
             context_lens=context_lens)
 
-        # 在这里应用 checkpointing
-        for i, block in enumerate(self.blocks):
-            if use_checkpoint:
-                # 使用checkpoint
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        x_block = inputs[0]
-                        block_kwargs = {k: inputs[i+1] for i, k in enumerate(kwargs.keys())}
-                        return module(x_block, **block_kwargs)
-                    return custom_forward
-                
-                # 将所有kwargs参数传入checkpoint函数
-                x = checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    x,
-                    *kwargs.values(),
-                    use_reentrant=False
-                )
-            else:
-                # 不使用checkpoint的原始逻辑
-                x = block(x, **kwargs)
+        print(f"in exractor before block, rank {dist.get_rank()}, x shape: {x.shape}")
+        if dist.get_rank()==0:
+            print(self.blocks[0])
+        for block in self.blocks:
+            x = block(x, **kwargs)
+
+        if get_sequence_parallel_state():
+            print(f"rank{torch.distributed.get_rank()} in exractor, all_gather x{x.shape}")
+            x = all_gather(x,dim=1).contiguous()
 
         # head
         x = self.head(x, e)

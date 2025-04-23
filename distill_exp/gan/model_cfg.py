@@ -699,15 +699,17 @@ class WanModelCFG(ModelMixin, ConfigMixin):
 
         block_idx = 0
         cls_xs = []
+        print(f"in WanModelCFG before block, rank {dist.get_rank()}, x shape: {x.shape}")
         for block in self.blocks:
             x = block(x, **kwargs)
             if cls and block_idx in cls_layers:
-                cls_xs.append(x.squeeze())
+                if get_sequence_parallel_state():
+                    x_fea = all_gather(x,dim=1).contiguous()
+                cls_xs.append(x_fea.squeeze())
             block_idx += 1
-        if cls:
-            return cls_xs
 
         if get_sequence_parallel_state():
+            print(f"in WanModelCFG after block, rank {dist.get_rank()}, x shape: {x.shape}")
             x = all_gather(x,dim=1).contiguous()
 
         # head
@@ -715,7 +717,7 @@ class WanModelCFG(ModelMixin, ConfigMixin):
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
-        return [u.float() for u in x]
+        return [u.float() for u in x] if not cls else [ [u.float() for u in x], cls_xs ]
 
     def unpatchify(self, x, grid_sizes):
         r"""

@@ -301,21 +301,21 @@ def generate(args):
         logging.info("Creating WanT2V pipeline.")
         args.size, size_name = "832*480", "480p"
         # args.size, size_name = "1280*720", "720p"
-        check_point_step = 1000
+        check_point_step = 650
 
         ckp_dir = ""
         lora_dir = ""
 
-        lora_alpha = 32
-        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/exp_results/exp4.3/{check_point_step}_{size_name}_{lora_alpha}"
-        transfromer_dir = "/cv/wangxuekuan/exp_models/distill/wanx-t2v/s5_exp0/checkpoint-1000"
-        ckp_dir = "/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0409_1448|26/checkpoint_model_000499/feedforward.bin"
-        lora_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/outputs/exp4.3/checkpoint-{check_point_step}"
+        # lora_alpha = 32
+        # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/exp_results/exp4.3/{check_point_step}_{size_name}_{lora_alpha}"
+        # transfromer_dir = "/cv/wangxuekuan/exp_models/distill/wanx-t2v/s5_exp0/checkpoint-1000"
+        # ckp_dir = "/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0409_1448|26/checkpoint_model_000499/feedforward.bin"
+        # lora_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/outputs/exp4.3/checkpoint-{check_point_step}"
 
-        # transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp20_cd_t2v_720/checkpoint-{check_point_step}"
-        # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/exp20_cd_t2v_720/{check_point_step}_{size_name}"
-        # lora_alpha = None
-        # lora_dir = ""
+        transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/debug/checkpoint-{check_point_step}"
+        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/cd_gan_debug/{check_point_step}_{size_name}"
+        lora_alpha = None
+        lora_dir = ""
         wan_t2v = wan.WanT2V(
             config=cfg,
             checkpoint_dir=args.ckpt_dir,

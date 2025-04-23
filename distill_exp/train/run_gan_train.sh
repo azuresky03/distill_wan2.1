@@ -18,8 +18,8 @@ NUM_WORKERS=4
 EPOCHS=50
 SAVE_FREQ=1
 
-H=720
-W=1280
+H=480
+W=832
 
 # 模型相关参数
 NUM_LAYERS=1
@@ -37,8 +37,8 @@ torchrun --nproc_per_node=$NUM_GPUS \
     distill_exp/train/train_gan.py \
     --resume "/cv/zhangpengpeng/cv/video_generation/Wan2.1/output/gan_training/checkpoints/best.pth" \
     --debug 20 \
-    --h $H \
-    --w $W \
+    --height $H \
+    --width $W \
     --distilled_model_path "/cv/wangxuekuan/release_model/wanx/distill_cfg_t2v/exp10_distill_cfg/checkpoint-500" \
     --json_path "/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/processed/mixkit/video/wan_exp10_cfg_480/video_meta.json" \
     --base_model_path $BASE_MODEL_PATH \

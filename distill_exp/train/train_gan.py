@@ -345,15 +345,19 @@ class GanTrainer:
             y = [torch.load(item["y_path"],weights_only=False).to(self.device)] if self.args.i2v else None
             clip_fea = torch.load(item["clip_feature_path"],weights_only=False).to(self.device) if self.args.i2v else None
 
-            t = torch.tensor([random.randint(1,999)],device=self.device).to(self.dtype)
+            sigmas = random.randint(1,1000)
+            t = torch.tensor([sigmas],device=self.device).to(self.dtype)
             noise = torch.randn_like(fake).to(self.device).to(self.dtype)
-            gt_noised = [self.noise_scheduler.add_noise(gt,noise,t)]
-            fake_noised = [self.noise_scheduler.add_noise(fake,noise,t)]
+            gt_noised = [gt * (1 - sigmas / 1000) + noise * (sigmas / 1000)]
+            fake_noised = [fake * (1 - sigmas / 1000) + noise * (sigmas / 1000)]
+            cfg_tensor = torch.tensor([random.randint(3,8)*1000],device=self.device).to(self.dtype)
+            # gt_noised = [self.noise_scheduler.add_noise(gt,noise,t)]
+            # fake_noised = [self.noise_scheduler.add_noise(fake,noise,t)]
 
             # 步骤1: 计算真实样本的损失 (不立即更新梯度)
             with self.context_manager:
                 with torch.no_grad():
-                    gt_mid = self.distilled_model(gt_noised, t, prompt_embed, self.seq_len, y=y, clip_fea=clip_fea, cls=True, cls_layers=self.args.layer_idxs)
+                    gt_mid = self.distilled_model(gt_noised, t, prompt_embed, self.seq_len, y=y, clip_fea=clip_fea, cls=True, cls_layers=self.args.layer_idxs,guidance=cfg_tensor)[1]
                 gt_logit = self.model(gt_mid, t, prompt_embed, self.seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_fea)
                 real_labels = torch.ones_like(gt_logit, device=self.device, dtype=self.dtype)
                 real_loss = self.criterion(gt_logit, real_labels)
@@ -368,7 +372,7 @@ class GanTrainer:
             # 步骤2: 计算生成样本的损失 (梯度会累积)
             with self.context_manager:
                 with torch.no_grad():
-                    fake_mid = self.distilled_model(fake_noised, t, prompt_embed, self.seq_len, y=y, clip_fea=clip_fea, cls=True, cls_layers=self.args.layer_idxs)
+                    fake_mid = self.distilled_model(fake_noised, t, prompt_embed, self.seq_len, y=y, clip_fea=clip_fea, cls=True, cls_layers=self.args.layer_idxs,guidance=cfg_tensor)[1]
                 fake_logit = self.model(fake_mid, t, prompt_embed, self.seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_fea)
                 fake_labels = torch.zeros_like(fake_logit, device=self.device, dtype=self.dtype)
                 fake_loss = self.criterion(fake_logit, fake_labels)
@@ -449,21 +453,23 @@ class GanTrainer:
                 y = [torch.load(item["y_path"],weights_only=False).to(self.device)] if self.args.i2v else None
                 clip_fea = torch.load(item["clip_feature_path"],weights_only=False).to(self.device) if self.args.i2v else None
 
-                t = torch.tensor([random.randint(1,999)],device=self.device)
+                sigmas = random.randint(1,1000)
+                t = torch.tensor([sigmas],device=self.device).to(self.dtype)
                 noise = torch.randn_like(fake).to(self.device).to(self.dtype)
-                gt_noised = [self.noise_scheduler.add_noise(gt,noise,t)]
-                fake_noised = [self.noise_scheduler.add_noise(fake,noise,t)]
+                gt_noised = [gt * (1 - sigmas / 1000) + noise * (sigmas / 1000)]
+                fake_noised = [fake * (1 - sigmas / 1000) + noise * (sigmas / 1000)]
+                cfg_tensor = torch.tensor([random.randint(3,8)*1000],device=self.device).to(self.dtype)
 
                 # 在验证过程中，可以一次性计算真实和生成样本的损失
                 with self.context_manager:
                     # 计算真实样本的输出
-                    gt_mid = self.distilled_model(gt_noised, t, prompt_embed, self.seq_len, y=y, clip_fea=clip_fea, cls=True, cls_layers=self.args.layer_idxs)
+                    gt_mid = self.distilled_model(gt_noised, t, prompt_embed, self.seq_len, y=y, clip_fea=clip_fea, cls=True, cls_layers=self.args.layer_idxs,guidance=cfg_tensor)[1]
                     gt_logit = self.model(gt_mid, t, prompt_embed, self.seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_fea)
                     real_labels = torch.ones_like(gt_logit, device=self.device, dtype=self.dtype)
                     real_loss = self.criterion(gt_logit, real_labels)
                     
                     # 计算生成样本的输出
-                    fake_mid = self.distilled_model(fake_noised, t, prompt_embed, self.seq_len, y=y, clip_fea=clip_fea, cls=True, cls_layers=self.args.layer_idxs)
+                    fake_mid = self.distilled_model(fake_noised, t, prompt_embed, self.seq_len, y=y, clip_fea=clip_fea, cls=True, cls_layers=self.args.layer_idxs,guidance=cfg_tensor)[1]
                     fake_logit = self.model(fake_mid, t, prompt_embed, self.seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_fea)
                     fake_labels = torch.zeros_like(fake_logit, device=self.device, dtype=self.dtype)
                     fake_loss = self.criterion(fake_logit, fake_labels)
