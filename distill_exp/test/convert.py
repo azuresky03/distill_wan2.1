@@ -5,7 +5,7 @@ from distill_exp.gan.model_cfg import WanModelCFG
 import torch
 
 model = WanModelCFG.from_pretrained("/cv/wangxuekuan/release_model/wanx/distill_cfg_t2v/exp10_distill_cfg/checkpoint-500")
-ckp_dir = "/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0409_1448|26/checkpoint_model_000499/feedforward.bin"
+ckp_dir = "/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0424_2046|41/checkpoint_model_002999/feedforward.bin"
 model.load_state_dict(torch.load(ckp_dir,weights_only=True))
 
 save_dir = ckp_dir.replace(".bin", "")

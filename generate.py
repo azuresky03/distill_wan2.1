@@ -300,20 +300,27 @@ def generate(args):
 
         logging.info("Creating WanT2V pipeline.")
         args.size, size_name = "832*480", "480p"
-        # args.size, size_name = "1280*720", "720p"
-        check_point_step = 650
+        args.size, size_name = "1280*720", "720p"
+        args.size, size_name = "1920*1072", "1080p"
+        check_point_step = 500
 
         ckp_dir = ""
         lora_dir = ""
 
         # lora_alpha = 32
         # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/exp_results/exp4.3/{check_point_step}_{size_name}_{lora_alpha}"
-        # transfromer_dir = "/cv/wangxuekuan/exp_models/distill/wanx-t2v/s5_exp0/checkpoint-1000"
+        # transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0424_2046|41/checkpoint_model_006999/feedforward"
+        # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/dmd/exp10/{check_point_step}_{size_name}"
         # ckp_dir = "/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0409_1448|26/checkpoint_model_000499/feedforward.bin"
         # lora_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/outputs/exp4.3/checkpoint-{check_point_step}"
 
-        transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/debug/checkpoint-{check_point_step}"
-        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/cd_gan_debug/{check_point_step}_{size_name}"
+        transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan_1080p/output/distill_1080p/exp8/checkpoints/checkpoint-step_{check_point_step}"
+        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/distill_1080p/exp8/{check_point_step}_{size_name}"
+        # transfromer_dir = "/cv/bjzhu/home/zulu/fvwan/outputs/NEW1080p-v5-320k-dataV11promptrefine-2000V11continueV12-step1700continuev121-step800continuev123-mixP/checkpoints/checkpoint-step_400"
+        # parent_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/distill_1080p/exp6/org_gen"
+        # transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/output/post_gan/exp1/checkpoint-{check_point_step}"
+        # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/post_gan/exp1/{check_point_step}_{size_name}"
+        # transfromer_dir = "/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0424_2046|41/checkpoint_model_000999/feedforward"
         lora_alpha = None
         lora_dir = ""
         wan_t2v = wan.WanT2V(
@@ -334,12 +341,13 @@ def generate(args):
         logging.info(
             f"Generating {'image' if 't2i' in args.task else 'video'} ...")
         # for size in SIZE_CONFIGS.values():
-        test_file = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/test_prompts.txt"
+        test_file = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/moviibench_2.0_prompts.txt"
+        # test_file = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/test_prompts.txt"
         with open(test_file, "r") as f:
             lines = f.readlines()
-        for guidance in [8]:
-            for i in range(20):
-                for shift,step in [(15,5),(10,5)]:
+        for i in range(68):
+            for guidance in [5]:
+                for shift,step in [(7,50)]:
                     # if i > 8:
                     #     continue
                     line = lines[i]
@@ -370,7 +378,7 @@ def generate(args):
                             # args.save_file = f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}" + suffix
                             Path(parent_dir).mkdir(parents=True, exist_ok=True)
                             # args.save_file = str(parent_dir) + f"/step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
-                            args.save_file = str(parent_dir) + f"/{args.prompt[:7]}_step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
+                            args.save_file = str(parent_dir) + f"/{i}_{args.prompt[:7]}_step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
 
                         if "t2i" in args.task:
                             logging.info(f"Saving generated image to {args.save_file}")
@@ -425,10 +433,14 @@ def generate(args):
         # args.size, size_name = "480*832", "480p"
         args.size, size_name = "1280*720", "720p"
 
-        ckp_step = 400
+        ckp_step = 500
         transfromer_dir = ""
-        transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp19.5_distill_step_i2v_7_to_4/checkpoint-{ckp_step}"
-        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/exp19.5_distill_step_i2v_7_to_4/{ckp_step}_{size_name}_prompts"
+        exp_name = "exp9"
+        transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan_1080p/output/distill_1080p/{exp_name}/checkpoints/checkpoint-step_{ckp_step}"
+        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/distill_1080p/{exp_name}/{ckp_step}_{size_name}"
+        # transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/{exp_name}/checkpoint-{ckp_step}"
+        # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/{exp_name}/sorted_kling2_0425_gen_result_result_{ckp_step}_{size_name}"
+        # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/i2v/sorted_kling2_0425_gen_result"
         logging.info("Creating WanI2V pipeline.")
         wan_i2v = wan.WanI2V(
             config=cfg,
@@ -443,17 +455,32 @@ def generate(args):
         )
 
         logging.info("Generating video ...")
-        args.sample_steps = 4
+        args.sample_steps = 40
         
-        prompts_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/examples/i2v/"
-        with open(prompts_dir+"all.txt", "r") as f:
-            lines = f.readlines()
-        for prompt, image_dir in [line.strip().split(" ! ") for line in lines]:
-            logging.info(f"prompt: {prompt}, image: {image_dir}")
-            img = Image.open(prompts_dir+image_dir).convert("RGB")
-            args.prompt = prompt
-            for guidance in [8]:
-                for shift in [10,15]:
+        # prompts_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/examples/i2v/"
+        # with open(prompts_dir+"all.txt", "r") as f:
+        #     lines = f.readlines()
+        # for prompt, image_dir in [line.strip().split(" ! ") for line in lines[:3]]:
+        #     logging.info(f"prompt: {prompt}, image: {image_dir}")
+        #     img = Image.open(prompts_dir+image_dir).convert("RGB")
+        #     args.prompt = prompt
+
+        pro_dir = "/cv/wangxuekuan/code/download_video/video/i2v/kling2_0425_gen_result.csv"
+        print(pro_dir)
+        list_of_file = sorted(os.listdir(pro_dir))
+        counter = 0
+        for file_dir in list_of_file:
+            if not file_dir.endswith(".jpg"):
+                continue
+            img = Image.open(os.path.join(pro_dir,file_dir)).convert("RGB")
+            args.prompt = file_dir[:-4]
+            if len(args.prompt)<10:
+                continue
+            counter += 1
+            # if counter <=15:
+            #     continue
+            for guidance in [5]:
+                for shift in [7]:
                     args.sample_shift = shift
                     args.sample_guide_scale = guidance
                     video = wan_i2v.generate(
@@ -471,7 +498,7 @@ def generate(args):
                     if rank == 0:
                         Path(parent_dir).mkdir(parents=True, exist_ok=True)
                         # args.save_file = str(parent_dir) + f"/step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
-                        args.save_file = str(parent_dir) + f"/{args.prompt[:7]}_step{args.sample_steps}_shift{args.sample_shift}_guide{args.sample_guide_scale}.mp4"
+                        args.save_file = str(parent_dir) + f"/{counter}_{args.prompt[:7]}_step{args.sample_steps}_shift{args.sample_shift}_guide{args.sample_guide_scale}.mp4"
 
                         if args.save_file is None:
                             formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -95,6 +95,7 @@ def distill_one_step(
     debug_save_dir = "",
     vae=None,
     args=None,
+    student_sch=None,
 ):
     total_loss = 0.0
     optimizer.zero_grad()
@@ -114,8 +115,12 @@ def distill_one_step(
         bsz = model_input.shape[0]
 
         timesteps_all = noise_scheduler.timesteps
-         
-        index = torch.randint(0, args.interval_steps-args.k, (bsz, ), device=model_input.device).long()
+
+        if args.distill_mode == "half2":
+            stu_index = torch.randint(0, args.student_sch_step-1, (bsz, ), device=model_input.device).long()
+            index = stu_index * (args.k+1)
+        else: 
+            stu_index = index = torch.randint(0, args.interval_steps-args.k, (bsz, ), device=model_input.device).long()
         
         if sp_size > 1:
             broadcast(index)
@@ -139,12 +144,13 @@ def distill_one_step(
             x = [noisy_model_input[i] for i in range(noisy_model_input.size(0))]
             model_pred = transformer(x,timesteps,None,max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature)[0] #43200
 
-        model_pred_org = model_pred.clone()
-        noise_scheduler.model_outputs = [None] * noise_scheduler.config.solver_order
-        noise_scheduler.lower_order_nums = 0
-        noise_scheduler._step_index = int(index.item())
-        noise_scheduler.last_sample = None
-        model_pred_prev, model_pred_x0 = noise_scheduler.step(sample=noisy_model_input, model_output=model_pred, timestep=timesteps,return_dict=False)
+        # model_pred_org = model_pred.clone()
+        stu_noise_scheduler = student_sch if student_sch is not None else noise_scheduler
+        stu_noise_scheduler.model_outputs = [None] * stu_noise_scheduler.config.solver_order
+        stu_noise_scheduler.lower_order_nums = 0
+        stu_noise_scheduler._step_index = int(stu_index.item())
+        stu_noise_scheduler.last_sample = None
+        model_pred_prev, model_pred_x0 = stu_noise_scheduler.step(sample=noisy_model_input, model_output=model_pred, timestep=timesteps,return_dict=False)
 
         with torch.no_grad():
             x_prev = x
@@ -179,8 +185,9 @@ def distill_one_step(
         # loss = loss.mean()
         loss = (torch.mean(torch.sqrt((model_pred_x0.float() - traget_x0.float())**2 + huber_c**2) - huber_c) /
                 gradient_accumulation_steps)
-        # loss += (torch.mean(torch.sqrt((model_pred_prev.float() - target_prev.float())**2 + huber_c**2) - huber_c) /
-        #         gradient_accumulation_steps)
+        if args.distill_mode == "half":
+            loss += (torch.mean(torch.sqrt((model_pred_prev.float() - target_prev.float())**2 + huber_c**2) - huber_c) /
+                    gradient_accumulation_steps)
         
         if pred_decay_weight > 0:
             if pred_decay_type == "l1":
@@ -256,19 +263,6 @@ def main(args):
     # as these weights are only used for inference, keeping weights in full precision is not required.
 
     # Create model:
-    '''
-        self.step_ratio = timesteps // euler_timesteps
-        self.euler_timesteps = (np.arange(1, euler_timesteps + 1) * self.step_ratio).round().astype(np.int64) - 1
-        self.euler_timesteps_prev = np.asarray([0] + self.euler_timesteps[:-1].tolist())
-        self.sigmas = sigmas[self.euler_timesteps]
-        self.sigmas_prev = np.asarray([sigmas[0]] +
-                                      sigmas[self.euler_timesteps[:-1]].tolist())  # either use sigma0 or 0
-
-        self.euler_timesteps = torch.from_numpy(self.euler_timesteps).long()
-        self.euler_timesteps_prev = torch.from_numpy(self.euler_timesteps_prev).long()
-        self.sigmas = torch.from_numpy(self.sigmas)
-        self.sigmas_prev = torch.from_numpy(self.sigmas_prev)
-    '''
 
     main_print(f"--> loading model from {args.resume_from_weight}")
 
@@ -341,6 +335,13 @@ def main(args):
 
     timesteps = noise_scheduler.timesteps
     main_print(f"noise_scheduler timesteps: {timesteps}")
+
+    if args.distill_mode == "half2":
+        assert args.k==1 and args.student_sch_step
+        student_sch = FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=1)
+        student_sch.set_timesteps(args.student_sch_step, device=device, shift=args.shift)
+    else:
+        student_sch = None
 
     params_to_optimize = transformer.parameters()
     params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
@@ -496,7 +497,8 @@ def main(args):
             args.max_seq_len,
             debug_save_dir=debug_save_dir,
             vae=vae,
-            args=args
+            args=args,
+            student_sch=student_sch,
         )
 
         step_time = time.time() - start_time
@@ -763,6 +765,16 @@ def get_args():
     parser.add_argument("--i2v",action="store_true",default=False)
     parser.add_argument("--k",type=int,default=1)
     parser.add_argument("--interval_steps",type=int,default=50)
+    # 蒸馏选项
+    parser.add_argument(
+        "--distill_mode",
+        type=str,
+        default="consistency",
+        choices=["half", "consistency", "half2"],
+        help="蒸馏模式: half(标准模式), consistency(一致性蒸馏)"
+    )
+    parser.add_argument("--student_sch_step", type=int, default=None)
+
     args = parser.parse_args()
 
     return args

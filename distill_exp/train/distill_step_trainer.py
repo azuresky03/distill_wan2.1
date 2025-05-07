@@ -202,6 +202,15 @@ class DistillTrainer:
             lr=self.args.gan_learning_rate,
             weight_decay=self.args.gan_weight_decay,
         )
+        
+        # 创建GAN学习率调度器
+        main_print(f"max_train_steps {self.args.max_train_steps}")
+        self.gan_lr_scheduler = get_scheduler(
+            "cosine",  # 使用余弦退火调度
+            optimizer=self.gan_optimizer,
+            num_warmup_steps=0,  # 5%的总步数用于预热
+            num_training_steps=self.args.max_train_steps,
+        )
 
         self.gan_criterion = torch.nn.BCEWithLogitsLoss()
         
@@ -390,6 +399,10 @@ class DistillTrainer:
             disable=self.rank > 0,  # 仅在主进程显示
         )
         
+        if not self.args.gan_path:
+            for gan_idx in range(30):
+                self.gan_step(self.dataloader, guidance_cfg=5,args=self.args)
+
         # 跳过已完成的步骤
         for i in range(self.init_steps):
             next(self.dataloader)
@@ -444,7 +457,7 @@ class DistillTrainer:
             avg_step_time = sum(step_times) / len(step_times)
             
             # 更新进度条
-            main_print(f"Step {step}/{self.args.max_train_steps} - Loss: {loss:.4f} Gan Loss: {gan_loss:.4f} - Step time: {step_time:.2f}s")
+            main_print(f"Step {step}/{self.args.max_train_steps} - Gen Loss: {loss:.4f} Gan Loss: {gan_loss:.4f} - Step time: {step_time:.2f}s")
             progress_bar.set_postfix({
                 "loss": f"{loss:.4f}",
                 "step_time": f"{step_time:.2f}s",
@@ -478,6 +491,8 @@ class DistillTrainer:
         args=None,
     ):
         total_loss = 0.0
+        total_cd_loss = 0
+        total_gan_loss = 0
         self.optimizer.zero_grad()
         model_pred_norm = {
             "fro": 0.0,  # codespell:ignore
@@ -564,14 +579,21 @@ class DistillTrainer:
 
             huber_c = 0.001
             # loss = loss.mean()
-            loss = (torch.mean(torch.sqrt((model_pred_x0.float() - traget_x0.float())**2 + huber_c**2) - huber_c) /
+            cd_loss = (torch.mean(torch.sqrt((model_pred_x0.float() - traget_x0.float())**2 + huber_c**2) - huber_c) /
                     self.gradient_accumulation_steps)
             # loss += (torch.mean(torch.sqrt((model_pred_prev.float() - target_prev.float())**2 + huber_c**2) - huber_c) /
             #         gradient_accumulation_steps)
+            avg_cd_loss = cd_loss.detach().clone()
+            dist.all_reduce(avg_cd_loss, op=dist.ReduceOp.AVG)
+            total_cd_loss += avg_cd_loss.item()
+            loss = cd_loss
 
             if self.gan:
-                main_print(f"cd loss: {loss.item():.2e} gan_loss: {gan_loss.item() * self.args.gan_loss_weight:.2e}")
-                loss += gan_loss * self.args.gan_loss_weight / self.gradient_accumulation_steps
+                gan_loss = gan_loss * self.args.gan_loss_weight / self.gradient_accumulation_steps
+                loss += gan_loss
+                avg_gan_loss = gan_loss.detach().clone()
+                dist.all_reduce(avg_gan_loss, op=dist.ReduceOp.AVG)
+                total_gan_loss += avg_gan_loss.item()
             
             if self.pred_decay_weight > 0:
                 if self.pred_decay_type == "l1":
@@ -604,6 +626,8 @@ class DistillTrainer:
         self.optimizer.step()
         self.lr_scheduler.step()
 
+        main_print(f"cd_loss: {total_cd_loss:.2e}, gan_loss: {total_gan_loss:.2e}")
+
         if debug_save_dir:
             torch.cuda.empty_cache()
             assert vae is not None
@@ -624,14 +648,18 @@ class DistillTrainer:
         args=None,
     ):
         total_loss = 0.0
-        self.gan_optimizer.zero_grad()
+        total_fake_loss = 0.0
+        total_true_loss = 0.0
         model_pred_norm = {
             "fro": 0.0,  # codespell:ignore
             "largest singular value": 0.0,
             "absolute mean": 0.0,
             "absolute max": 0.0,
         }
+        # main_print("")
+        # main_print("new_epoch")
         for _ in range(self.gradient_accumulation_steps):
+            # main_print(f"gradient {_}")
             latents, encoder_hidden_states, attention_mask, encoder_attention_mask, y, clip_feature = next(loader)
             if not args.i2v:
                 y, clip_feature = None, None
@@ -680,33 +708,51 @@ class DistillTrainer:
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 x_fake = [noisy_model_input_fake[i] for i in range(noisy_model_input_fake.size(0))]
                 with torch.no_grad():
+                    # main_print(f"x_fake mean {torch.mean(x_fake[0])}")
                     model_pred_fake, mid_features_fake = self.transformer(x_fake,timesteps,None,self.max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature,cls=self.args.gan,cls_layers=self.layer_idxs)
                 self.gan.requires_grad_(True)
-                logit = self.gan(mid_features_fake, timesteps, encoder_hidden_states, self.max_seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_feature)
-            fake_labels = torch.zeros_like(logit, device=self.device, dtype=torch.bfloat16)
-            gan_fake_loss = self.gan_criterion(logit, fake_labels)
+                # main_print(f"mid_features_fake 0 {torch.mean(mid_features_fake[0])}")
+                fake_logit = self.gan(mid_features_fake, timesteps, encoder_hidden_states, self.max_seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_feature)
+            fake_labels = torch.zeros_like(fake_logit, device=self.device, dtype=torch.bfloat16)
+            gan_fake_loss = self.gan_criterion(fake_logit, fake_labels) / self.gradient_accumulation_steps
             gan_fake_loss.backward()
 
-            model = self.ema_transformer if self.args.use_ema else self.teacher_transformer
+            # model = self.ema_transformer if self.args.use_ema else self.teacher_transformer
+            model = self.transformer
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 with torch.no_grad():
+                    # main_print(f"x mean {torch.mean(x[0])}")
                     model_pred, mid_features_true = model(x,timesteps,None,self.max_seq_len,batch_context=encoder_hidden_states,context_mask=encoder_attention_mask,guidance=guidance_tensor,y=y,clip_fea=clip_feature,cls=self.args.gan,cls_layers=self.layer_idxs)
-                model_pred = model_pred[0]
 
                 self.gan.requires_grad_(True)
-                logit = self.gan(mid_features_true, timesteps, encoder_hidden_states, self.max_seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_feature)
-            true_labels = torch.ones_like(logit, device=self.device, dtype=torch.bfloat16)
-            gan_true_loss = self.gan_criterion(logit, true_labels)
+                # main_print(f"mid_features_true 0 {torch.mean(mid_features_true[0])}")
+                true_logit = self.gan(mid_features_true, timesteps, encoder_hidden_states, self.max_seq_len, w=self.w, h=self.h, y=y, clip_fea=clip_feature)
+            true_labels = torch.ones_like(true_logit, device=self.device, dtype=torch.bfloat16)
+            gan_true_loss = self.gan_criterion(true_logit, true_labels) / self.gradient_accumulation_steps
             gan_true_loss.backward()
 
-            main_print(f"gan_fake_loss: {gan_fake_loss.item():.4f}, gan_true_loss: {gan_true_loss.item():.4f}")
+            # main_print(f"index {index} ture logit {true_logit.item():.4f} fake logit {fake_logit.item():.4f} gan_true_loss: {gan_true_loss.item():.4f}, gan_fake_loss: {gan_fake_loss.item():.4f}")
+
             loss = (gan_fake_loss + gan_true_loss) / 2
 
+            avg_true_loss = gan_true_loss.detach().clone()
+            dist.all_reduce(avg_true_loss, op=dist.ReduceOp.AVG)
+            total_true_loss += avg_true_loss.item()
+            avg_fake_loss = gan_fake_loss.detach().clone()
+            dist.all_reduce(avg_fake_loss, op=dist.ReduceOp.AVG)
+            total_fake_loss += avg_fake_loss.item()
             avg_loss = loss.detach().clone()
             dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
             total_loss += avg_loss.item()
         
-        self.gan_optimizer.step()
+            # 应用梯度更新并调整学习率
+            self.gan_optimizer.step()
+            self.gan_lr_scheduler.step()
+            self.gan_optimizer.zero_grad()
+        
+        # 获取并打印当前学习率
+        current_lr = self.gan_optimizer.param_groups[0]['lr']
+        main_print(f"gan_true_loss: {total_true_loss:.4f}, gan_fake_loss: {total_fake_loss:.4f}, current_lr: {current_lr:.2e}")
 
         return total_loss
 
@@ -774,10 +820,6 @@ def get_args():
     parser.add_argument("--cfg", type=float, default=5)
 
     # validation & logs
-    parser.add_argument("--validation_sampling_steps", type=str, default="64")
-    parser.add_argument("--validation_guidance_scale", type=str, default="4.5")
-
-    parser.add_argument("--validation_steps", type=float, default=64)
     parser.add_argument("--log_validation", action="store_true", default=False)
     parser.add_argument("--tracker_project_name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")

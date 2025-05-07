@@ -21,8 +21,8 @@ class SelfAttention(nn.Module):
         dim,
         num_heads=8,
         dropout=0.0,
-        use_flash_attn=False,
-        qk_norm=False,
+        use_flash_attn=True,
+        qk_norm=True,
         scale_factor=None,
     ):
         super().__init__()

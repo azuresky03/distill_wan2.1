@@ -13,6 +13,92 @@ __all__ = [
 
 CACHE_T = 2
 
+# torch.backends.cuda.matmul.allow_tf32 = False
+# torch.backends.cudnn.allow_tf32      = False
+
+# # # 选确定性算法；关掉 autotune
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark     = False
+
+# # # PyTorch ≥1.13 可进一步锁死算法
+# torch.use_deterministic_algorithms(True)
+
+import torch.distributed as dist
+class CausalConv3dTP(nn.Module):
+    """
+    张量并行版 CausalConv3d   (沿 out_channels 切分)
+    - 先把训练好的 nn.Conv3d 权重切片
+    - 推理时 All-Gather 输出
+    """
+
+    def __init__(self, pretrained: "CausalConv3d", pg=None):
+        super().__init__()
+        self.pg = pg or dist.group.WORLD
+        self.rank  = dist.get_rank(self.pg)
+        self.world = dist.get_world_size(self.pg)
+
+        # ---------- 1.   复制超参 ----------
+        kT, kH, kW = pretrained.kernel_size
+        sT, sH, sW = pretrained.stride
+        dT, dH, dW = pretrained.dilation
+
+        # ---------- 2.   切片权重 ----------
+        w, b = pretrained.weight, pretrained.bias
+        # 每卡负责多少输出通道
+        local_out = w.size(0) // self.world
+        start     = self.rank * local_out
+        end       = start + local_out
+        if w.size(0) % self.world != 0:
+            assert False, f"w shape {w.shape} bias shape {b.shape} 不均匀切分"
+
+        # print(f"rank{self.rank} w {w.shape} b {b.shape} start {start} end {end}")
+
+        self.conv = nn.Conv3d(
+            in_channels = w.size(1),
+            out_channels= end - start,
+            kernel_size = (kT, kH, kW),
+            stride      = (sT, sH, sW),
+            dilation    = (dT, dH, dW),
+            padding     = (0, 0, 0),     # 因果 padding 手动做
+            bias        = b is not None,
+            device=w.device,
+            dtype=w.dtype
+        )
+        self.conv.weight.data.copy_(w[start:end].contiguous())
+        if b is not None:
+            self.conv.bias.data.copy_(b[start:end].contiguous())
+
+        # 保存原因果 padding
+        self._padding = pretrained._padding
+
+        self.count = 0
+
+    # ---------- 3.   前向 ----------
+    @torch.no_grad()                      # 若要训练请去掉
+    def forward(self, x, cache_x=None):
+        self.count += 1
+
+        print(f"rank{dist.get_rank()} x {x.shape} cache_x: {cache_x.shape if cache_x is not None else None} conv: {self.conv.weight.shape}")
+
+        # ① 因果 pad
+        pad = list(self._padding)
+        if cache_x is not None and pad[4] > 0:
+            x = torch.cat([cache_x.to(x.device), x], dim=2)
+            pad[4] -= cache_x.size(2)
+        x = F.pad(x, pad)
+
+        # ② 本地卷积
+        y_local = self.conv(x)            # [B, local_out, T, H, W]
+
+        # ③ All-Gather
+        y_parts = [torch.zeros_like(y_local) for _ in range(self.world)]
+
+        dist.barrier(self.pg)
+        dist.all_gather(y_parts, y_local, group=self.pg)
+
+        output = torch.cat(y_parts, dim=1)  # [B, C_out, T, H, W]
+
+        return output
 
 class CausalConv3d(nn.Conv3d):
     """
@@ -27,6 +113,8 @@ class CausalConv3d(nn.Conv3d):
 
     def forward(self, x, cache_x=None):
         padding = list(self._padding)
+        # print(f"x {x.shape} padding: {padding} cache_x: {cache_x.shape if cache_x is not None else None} conv: {self.weight.shape}")
+        # breakpoint()
         if cache_x is not None and self._padding[4] > 0:
             cache_x = cache_x.to(x.device)
             x = torch.cat([cache_x, x], dim=2)
@@ -475,7 +563,7 @@ class Decoder3d(nn.Module):
 def count_conv3d(model):
     count = 0
     for m in model.modules():
-        if isinstance(m, CausalConv3d):
+        if isinstance(m, (CausalConv3d,CausalConv3dTP)):
             count += 1
     return count
 
