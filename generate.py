@@ -301,8 +301,8 @@ def generate(args):
         logging.info("Creating WanT2V pipeline.")
         args.size, size_name = "832*480", "480p"
         args.size, size_name = "1280*720", "720p"
-        args.size, size_name = "1920*1072", "1080p"
-        check_point_step = 500
+        # args.size, size_name = "1920*1072", "1080p"
+        check_point_step = 40
 
         ckp_dir = ""
         lora_dir = ""
@@ -314,12 +314,12 @@ def generate(args):
         # ckp_dir = "/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0409_1448|26/checkpoint_model_000499/feedforward.bin"
         # lora_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/RL/outputs/exp4.3/checkpoint-{check_point_step}"
 
-        transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan_1080p/output/distill_1080p/exp8/checkpoints/checkpoint-step_{check_point_step}"
-        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/distill_1080p/exp8/{check_point_step}_{size_name}"
+        # transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan_1080p/output/distill_1080p/exp8/checkpoints/checkpoint-step_{check_point_step}"
+        # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/distill_1080p/exp8/{check_point_step}_{size_name}"
         # transfromer_dir = "/cv/bjzhu/home/zulu/fvwan/outputs/NEW1080p-v5-320k-dataV11promptrefine-2000V11continueV12-step1700continuev121-step800continuev123-mixP/checkpoints/checkpoint-step_400"
         # parent_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/distill_1080p/exp6/org_gen"
-        # transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/output/post_gan/exp1/checkpoint-{check_point_step}"
-        # parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/post_gan/exp1/{check_point_step}_{size_name}"
+        transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/output/post_gan/exp5/checkpoint-{check_point_step}"
+        parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/post_gan/exp5/{check_point_step}_{size_name}"
         # transfromer_dir = "/cv/zhangpengpeng/cv/video_generation/DMD2_wanx/outputs/cache/time_0424_2046|41/checkpoint_model_000999/feedforward"
         lora_alpha = None
         lora_dir = ""
@@ -342,12 +342,12 @@ def generate(args):
             f"Generating {'image' if 't2i' in args.task else 'video'} ...")
         # for size in SIZE_CONFIGS.values():
         test_file = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/moviibench_2.0_prompts.txt"
-        # test_file = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/test_prompts.txt"
+        test_file = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/test_prompts.txt"
         with open(test_file, "r") as f:
             lines = f.readlines()
         for i in range(68):
             for guidance in [5]:
-                for shift,step in [(7,50)]:
+                for shift,step in [(7,1)]:
                     # if i > 8:
                     #     continue
                     line = lines[i]
@@ -433,9 +433,9 @@ def generate(args):
         # args.size, size_name = "480*832", "480p"
         args.size, size_name = "1280*720", "720p"
 
-        ckp_step = 500
+        ckp_step = 750
         transfromer_dir = ""
-        exp_name = "exp9"
+        exp_name = "exp10_i2v"
         transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan_1080p/output/distill_1080p/{exp_name}/checkpoints/checkpoint-step_{ckp_step}"
         parent_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/outputs/distill_1080p/{exp_name}/{ckp_step}_{size_name}"
         # transfromer_dir = f"/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/{exp_name}/checkpoint-{ckp_step}"
@@ -479,8 +479,8 @@ def generate(args):
             counter += 1
             # if counter <=15:
             #     continue
-            for guidance in [5]:
-                for shift in [7]:
+            for guidance in [5,8]:
+                for shift in [3,5]:
                     args.sample_shift = shift
                     args.sample_guide_scale = guidance
                     video = wan_i2v.generate(

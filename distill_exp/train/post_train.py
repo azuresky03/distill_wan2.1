@@ -628,6 +628,7 @@ class PostGanTrainer:
         total_real_acc = 0.0  # 真实样本被正确识别为真的准确率
         total_fake_acc = 0.0  # 生成样本被正确识别为假的准确率
         total_acc = 0.0       # 总体准确率
+        total_r1_loss = 0.0
         
         for _ in range(self.gradient_accumulation_steps):
             # main_print(f"gradient {_}")
@@ -657,18 +658,33 @@ class PostGanTrainer:
             real_labels = torch.ones_like(real_logit, device=self.device, dtype=real_logit.dtype)
             gan_true_loss = self.gan_criterion(real_logit, real_labels) / self.gradient_accumulation_steps
             gan_true_loss.backward()
+            # true_related_loss = gan_true_loss
 
             # 计算真样本准确率
             real_pred = torch.sigmoid(real_logit) >= 0.5  # 预测为真的样本 (大于等于0.5判为真)
             real_acc = real_pred.float().mean()  # 准确率
 
-            noise_level = 0.01
-            pertubed_latents = (1-noise_level) * latents + torch.rand_like(latents) * noise_level
+            if self.args.r1_loss:
+                noise_level = self.args.r1_noise_strength
+                pertubed_latents = torch.randn_like(latents) * noise_level + latents
+                pertubed_logit = self.gan_forward(pertubed_latents, [encoder_hidden_states], y=y, clip_feature=clip_feature)
+                # r1_loss = torch.mean((pertubed_logit - real_logit.detach().clone()) ** 2) * self.args.r1_loss_weight / self.gradient_accumulation_steps
+                huber_loss_fn = torch.nn.HuberLoss(delta=self.args.r1_loss_weight)
+                r1_loss_raw = huber_loss_fn(pertubed_logit, real_logit.detach().clone())
+                r1_loss = r1_loss_raw / self.gradient_accumulation_steps
+                r1_loss.backward()
+            #     true_related_loss += r1_loss
+            # true_related_loss.backward()
 
             # 总体准确率
             acc = (real_acc + fake_acc) / 2.0
 
             loss = (gan_fake_loss + gan_true_loss) / 2
+
+            if self.args.r1_loss:
+                avg_r1_loss = r1_loss.detach().clone()
+                dist.all_reduce(avg_r1_loss, op=dist.ReduceOp.AVG)
+                total_r1_loss += avg_r1_loss.item()
 
             avg_true_loss = gan_true_loss.detach().clone()
             dist.all_reduce(avg_true_loss, op=dist.ReduceOp.AVG)
@@ -703,7 +719,7 @@ class PostGanTrainer:
         
         # 获取并打印当前学习率
         current_lr = self.gan_optimizer.param_groups[0]['lr']
-        main_print(f"gan loss:{total_loss:.4f} gan_true_loss: {total_true_loss:.4f}, gan_fake_loss: {total_fake_loss:.4f}")
+        main_print(f"gan loss:{total_loss:.4f} gan_true_loss: {total_true_loss:.4f}, gan_fake_loss: {total_fake_loss:.4f}" + f" r1_loss: {total_r1_loss:.4f}" if self.args.r1_loss else "")
         main_print(f"gan acc:{total_acc:.4f} real_acc: {total_real_acc:.4f}, fake_acc: {total_fake_acc:.4f}")
 
         return total_loss
@@ -953,6 +969,11 @@ def get_args():
         default=0.001, 
         help="Weight decay for GAN optimizer."
     )
+
+    parser.add_argument("--r1_loss", action="store_true",default=False)
+    parser.add_argument("--r1_noise_strength", type=float, default=0.01)
+    parser.add_argument("--r1_loss_weight", type=float, default=1)
+
     args = parser.parse_args()
 
     return args

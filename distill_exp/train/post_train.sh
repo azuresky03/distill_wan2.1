@@ -18,12 +18,12 @@ torchrun --nnodes 1 --nproc_per_node 8 --master-port 29516\
     --null_encoded_path /vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/data/mixkit/meta/null.pt\
     --data_json_path "/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/processed/mixkit/720/videos2caption.json"\
     --output_dir "./output/post_gan/debug"\
-    --checkpointing_steps 10 \
+    --checkpointing_steps 100 \
     --seed 42\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 21 \
-    --sp_size 4 \
+    --sp_size 8 \
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps 1\
@@ -35,7 +35,10 @@ torchrun --nnodes 1 --nproc_per_node 8 --master-port 29516\
     --use_cpu_offload \
     --sample_steps 1 \
     --gan \
-    --gan_warmup_steps 0 \
+    --gan_warmup_steps 10 \
+    --r1_loss \
+    --r1_noise_strength 0.05 \
+    --r1_loss_weight 0.3 \
     --gan_update_per_gen 1 \
     --gan_learning_rate 1e-6 \
     # --gan_path /cv/zhangpengpeng/cv/video_generation/Wan2.1/output/post_gan/debug/gan_warmup.safetensors \
