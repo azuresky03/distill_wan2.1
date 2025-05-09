@@ -5,12 +5,10 @@
 # *.png
 *.gif
 *.bmp
-*.mp4
 *.mov
 *.mkv
 *.log
 *.zip
-*.pt
 *.pth
 *.ckpt
 *.safetensors
