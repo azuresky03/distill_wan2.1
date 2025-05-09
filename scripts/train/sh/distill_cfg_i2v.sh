@@ -4,6 +4,7 @@ export WANDB_MODE=online
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
+DATA_DIR=./data
 # IP=[MASTER NODE IP]
 
 # --master_weight_type bf16\
@@ -11,9 +12,9 @@ CUDA_LAUNCH_BLOCKING=1 TORCH_USE_CUDA_DSA=1 torchrun --nnodes 1 --nproc_per_node
     scripts/train/distill_cfg_i2v.py\
     --max_seq_len 75600 \
     --master_weight_type bf16\
-    --ckpt_dir /vepfs-zulution/wangxuekuan/code/algo_wanx_service/models/Wan2.1-I2V-14B-720P \
+    --ckpt_dir /vepfs-zulution/models/Wan2.1-I2V-14B-720P \
     --null_encoded_path /vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/data/mixkit/meta/null.pt\
-    --data_json_path "/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/processed/mixkit/720/videos2caption.json"\
+    --data_json_path "$DATA_DIR/processed/videos2caption.json"\
     --output_dir "$DATA_DIR/outputs/exp1_480"\
     --checkpointing_steps 50\
     --seed 42\

@@ -15,7 +15,7 @@ torchrun --nnodes 1 --nproc_per_node 8 --master-port 29516\
     --cfg 5 \
     --ckpt_dir /vepfs-zulution/wangxuekuan/code/algo_wanx_service/models/Wan2.1-I2V-14B-720P \
     --null_encoded_path /vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/data/mixkit/meta/null.pt\
-    --data_json_path "/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/processed/mixkit/720/videos2caption.json"\
+    --data_json_path "./data/processed/videos2caption.json"\
     --output_dir "./data/outputs/debug"\
     --checkpointing_steps 50 \
     --seed 42\
@@ -41,4 +41,5 @@ torchrun --nnodes 1 --nproc_per_node 8 --master-port 29516\
     --use_ema \
     --k 1 \
     --interval_steps 10 \
+    --distill_mode half \
     --i2v

@@ -15,9 +15,9 @@ torchrun --nnodes 1 --nproc_per_node 8 --master-port 29516\
     --resume_from_weight /cv/zhangpengpeng/cv/video_generation/Wan2.1/data/outputs/exp15_distill_cfg_i2v/checkpoint-50/diffusion_pytorch_model.safetensors \
     --master_weight_type bf16\
     --cfg 5 \
-    --ckpt_dir /vepfs-zulution/wangxuekuan/code/algo_wanx_service/models/Wan2.1-I2V-14B-720P \
+    --ckpt_dir /vepfs-zulution/models/Wan2.1-I2V-14B-720P \
     --null_encoded_path /vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/data/mixkit/meta/null.pt\
-    --data_json_path "/cv/zhangpengpeng/cv/video_generation/Wan2.1/data/processed/mixkit/merge_480/videos2caption.json"\
+    --data_json_path "./data/processed/videos2caption.json"\
     --output_dir "$DATA_DIR/outputs/exp14-7_480"\
     --checkpointing_steps 50 \
     --seed 42\

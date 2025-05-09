@@ -39,7 +39,7 @@ from fastvideo.utils.validation import log_validation
 from fastvideo.models.wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
 from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from fastvideo.models.wan.utils.utils import cache_video, cache_image, str2bool
-from fastvideo.models.wan.modules.model_cfg import WanModelCFG
+from fastvideo.models.wan.modules.model_cfg import WanModelCFG, WanAttentionBlock
 
 from scripts.train.util.util import load_wan, load_weights
 
@@ -274,14 +274,17 @@ def main(args):
         args.use_lora,
         args.use_cpu_offload,
         args.master_weight_type,
+        (WanAttentionBlock,)
     )
 
+    from scripts.train.model.model_seq import WanAttentionBlock as WanAttentionBlock2
     teacher_fsdp_kwargs, teacher_no_split_modules = get_dit_fsdp_kwargs(
         teacher_transformer,
         args.fsdp_sharding_startegy,
         args.use_lora,
         args.use_cpu_offload,
         args.master_weight_type,
+        (WanAttentionBlock2,)
     )
 
     transformer = FSDP(

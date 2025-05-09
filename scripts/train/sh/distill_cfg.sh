@@ -14,7 +14,7 @@ torchrun --nnodes 1 --nproc_per_node 8 --master-port 29516\
     --master_weight_type bf16\
     --ckpt_dir /vepfs-zulution/models/Wan2.1-T2V-14B\
     --null_encoded_path /vepfs-zulution/zhangpengpeng/cv/video_generation/Wan2.1/data/mixkit/meta/null.pt\
-    --data_json_path "$DATA_DIR/mixkit/processed/videos2caption.json"\
+    --data_json_path "$DATA_DIR/processed/videos2caption.json"\
     --output_dir "$DATA_DIR/outputs/exp1_480"\
     --checkpointing_steps 50\
     --seed 42\
