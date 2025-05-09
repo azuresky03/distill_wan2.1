@@ -45,6 +45,16 @@ The following distillation techniques are utilized in this project:
 * **Example Results**:
   * Original: `assets/org_The wom_step40_shift5_guide5.mp4` vs After RL: `assets/RL_In the _step7_shift13_guide8.mp4`
 
+## Inference
+* **Text-to-Video (t2v)**: Run `scripts/inference/inference.sh` for text-to-video generation tasks.
+* **Image-to-Video (i2v)**: Run `scripts/inference/i2v.sh` for image-to-video generation tasks.
+* **Configuration**:
+  * Update the `transformer_dir` variable in the scripts to point to your model checkpoint directory.
+  * Adjust LoRA-related settings in `generate.py` if using LoRA models.
+* **Test Prompts**:
+  * For t2v: Sample prompts are provided in `test_prompts.txt` and `moviibench_2.0_prompts.txt`.
+  * For i2v: Sample images and corresponding prompts are available in the `examples/i2v` directory.
+
 ## Combined Techniques
 By combining distillation (based on DMD2) and RL, we can achieve high-quality video generation in just 5 steps:
 * `assets/A coffe_step5_shift7_guide8.mp4`

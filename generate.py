@@ -341,8 +341,8 @@ def generate(args):
         logging.info(
             f"Generating {'image' if 't2i' in args.task else 'video'} ...")
         # for size in SIZE_CONFIGS.values():
-        test_file = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/moviibench_2.0_prompts.txt"
-        test_file = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/test_prompts.txt"
+        test_file = "./moviibench_2.0_prompts.txt"
+        test_file = "./test_prompts.txt"
         with open(test_file, "r") as f:
             lines = f.readlines()
         for i in range(68):
@@ -457,28 +457,13 @@ def generate(args):
         logging.info("Generating video ...")
         args.sample_steps = 40
         
-        # prompts_dir = "/cv/zhangpengpeng/cv/video_generation/Wan2.1/examples/i2v/"
-        # with open(prompts_dir+"all.txt", "r") as f:
-        #     lines = f.readlines()
-        # for prompt, image_dir in [line.strip().split(" ! ") for line in lines[:3]]:
-        #     logging.info(f"prompt: {prompt}, image: {image_dir}")
-        #     img = Image.open(prompts_dir+image_dir).convert("RGB")
-        #     args.prompt = prompt
-
-        pro_dir = "/cv/wangxuekuan/code/download_video/video/i2v/kling2_0425_gen_result.csv"
-        print(pro_dir)
-        list_of_file = sorted(os.listdir(pro_dir))
-        counter = 0
-        for file_dir in list_of_file:
-            if not file_dir.endswith(".jpg"):
-                continue
-            img = Image.open(os.path.join(pro_dir,file_dir)).convert("RGB")
-            args.prompt = file_dir[:-4]
-            if len(args.prompt)<10:
-                continue
-            counter += 1
-            # if counter <=15:
-            #     continue
+        prompts_dir = "./examples/i2v/"
+        with open(prompts_dir+"all.txt", "r") as f:
+            lines = f.readlines()
+        for prompt, image_dir in [line.strip().split(" ! ") for line in lines[:3]]:
+            logging.info(f"prompt: {prompt}, image: {image_dir}")
+            img = Image.open(prompts_dir+image_dir).convert("RGB")
+            args.prompt = prompt
             for guidance in [5,8]:
                 for shift in [3,5]:
                     args.sample_shift = shift
@@ -498,7 +483,7 @@ def generate(args):
                     if rank == 0:
                         Path(parent_dir).mkdir(parents=True, exist_ok=True)
                         # args.save_file = str(parent_dir) + f"/step{args.sample_steps}_shift{shift}_guide{args.sample_guide_scale}" + suffix
-                        args.save_file = str(parent_dir) + f"/{counter}_{args.prompt[:7]}_step{args.sample_steps}_shift{args.sample_shift}_guide{args.sample_guide_scale}.mp4"
+                        args.save_file = str(parent_dir) + f"/{args.prompt[:7]}_step{args.sample_steps}_shift{args.sample_shift}_guide{args.sample_guide_scale}.mp4"
 
                         if args.save_file is None:
                             formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
