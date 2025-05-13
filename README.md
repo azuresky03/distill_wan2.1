@@ -19,8 +19,23 @@ The following distillation techniques are utilized in this project:
 * **Performance**: Achieves 2X acceleration with minimal performance degradation.
 * **Training**: Run the script `scripts/train/sh/distill_cfg_i2v.sh`.
 * **Comparative Results**:
-  * `assets/cfg_distill_26_SuperVi_step40_shift3_guide5.mp4` (distilled) vs. `assets/org_26_SuperVi_step40_shift3_guide5.mp4` (original)
-  * `assets/cfg_distill_38_The wom_step40_shift5_guide5.mp4` (distilled) vs. `assets/org_The wom_step40_shift5_guide5.mp4` (original)
+  
+distilled
+
+https://github.com/user-attachments/assets/0ee4a260-0dee-47d2-a080-9f7a60d83825
+
+original
+
+https://github.com/user-attachments/assets/62a62cc3-ad78-4477-95d2-ca711d569b5e
+
+
+distilled
+
+https://github.com/user-attachments/assets/18981a28-a7d7-4008-8653-4aed35ffe052
+
+original
+
+https://github.com/user-attachments/assets/f84b27c4-048b-4f05-941a-f974936d7a10
 
 ### Step Distillation
 * **Training**: Run the script `scripts/train/sh/distill_step.sh`.
