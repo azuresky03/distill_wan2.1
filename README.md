@@ -20,30 +20,22 @@ The following distillation techniques are utilized in this project:
 * **Training**: Run the script `scripts/train/sh/distill_cfg_i2v.sh`.
 * **Comparative Results**:
 <table>
-  <tr>
-    <td align="center">
-      <strong>Distilled</strong><br>
-      <video src="https://github.com/user-attachments/assets/0ee4a260-0dee-47d2-a080-9f7a60d83825"
-             width="320" controls loop muted></video>
-    </td>
-    <td align="center">
-      <strong>Original</strong><br>
-      <video src="https://github.com/user-attachments/assets/62a62cc3-ad78-4477-95d2-ca711d569b5e"
-             width="320" controls loop muted></video>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <strong>Distilled</strong><br>
-      <video src="https://github.com/user-attachments/assets/18981a28-a7d7-4008-8653-4aed35ffe052"
-             width="320" controls loop muted></video>
-    </td>
-    <td align="center">
-      <strong>Original</strong><br>
-      <video src="https://github.com/user-attachments/assets/f84b27c4-048b-4f05-941a-f974936d7a10"
-             width="320" controls loop muted></video>
-    </td>
-  </tr>
+<tr>
+<td align="center">
+<video src="https://github.com/user-attachments/assets/0ee4a260-0dee-47d2-a080-9f7a60d83825" width="320" controls loop muted></video>
+</td>
+<td align="center">
+<video src="https://github.com/user-attachments/assets/62a62cc3-ad78-4477-95d2-ca711d569b5e" width="320" controls loop muted></video>
+</td>
+</tr>
+<tr>
+<td align="center">
+<video src="https://github.com/user-attachments/assets/18981a28-a7d7-4008-8653-4aed35ffe052" width="320" controls loop muted></video>
+</td>
+<td align="center">
+<video src="https://github.com/user-attachments/assets/f84b27c4-048b-4f05-941a-f974936d7a10" width="320" controls loop muted></video>
+</td>
+</tr>
 </table>
 
 
@@ -58,8 +50,24 @@ The following distillation techniques are utilized in this project:
     * **Description**: Consolidates the original two prediction steps into a single step.
     * **Training**: Run with the `--distill_mode half` flag.
     * **Example Results**:
+
+https://github.com/user-attachments/assets/bff12f8b-f7f6-48b9-b55a-3efc25aa5b09
+
+
       * `assets/halfed_38_The wom_step20_shift10_guide5.mp4` (halfed, 20 steps)
+      
+https://github.com/user-attachments/assets/4ac47433-11e4-4e1e-a7f4-a0c8893e579d
+
+
       * `assets/halfed_26_SuperVi_step20_shift10_guide5.mp4` (halfed, 20 steps)
+
+https://github.com/user-attachments/assets/1cf1d74c-4a7a-4ab1-83ac-fb20ffea8ff3
+
+
+https://github.com/user-attachments/assets/8528ebb7-2958-4888-ab9b-cc0767f63e1e
+
+
+
       * `assets/cfg_一位留着黑长直_step30_shift3_guide5.mp4` (baseline, 30 steps) vs `assets/halfed_一位留着黑长直_step15_shift9_guide8.mp4` (distilled, 15 steps)
       * `assets/cfg_一个宇航员走在_step30_shift3_guide5.mp4` (baseline, 30 steps) vs `assets/halfed_一个宇航员走在_step15_shift9_guide8.mp4` (distilled, 15 steps)
 
@@ -71,6 +79,14 @@ The following distillation techniques are utilized in this project:
 * **Inference**: Set `lora_alpha` to a smaller value than during training for more natural-looking videos.
 * **Example Results**:
   * Original: `assets/org_In the _step7_shift13_guide8.mp4` vs After RL: `assets/RL_In the _step7_shift13_guide8.mp4`
+
+
+https://github.com/user-attachments/assets/6d2f61d3-a0a0-4dbe-92bb-5e8e42ca19bb
+
+
+https://github.com/user-attachments/assets/dbc66d5f-8af6-4b7e-9bb1-d03740397ac9
+
+
 
 ## Inference
 * **Text-to-Video (t2v)**
@@ -92,3 +108,23 @@ By combining distillation (based on DMD2) and RL, we can achieve high-quality vi
 * `assets/After j_step5_shift15_guide8.mp4`
 * `assets/In the _step5_shift7_guide8.mp4`
 * `assets/The aft_step5_shift7_guide8.mp4`
+
+
+https://github.com/user-attachments/assets/aeaf967f-f17e-44d2-9809-501fc93d66b3
+
+
+https://github.com/user-attachments/assets/3a5f57b8-0815-40f5-b427-d1b08abf335d
+
+
+
+https://github.com/user-attachments/assets/6e11c8cd-45c6-47f2-9b19-f5831a75e710
+
+
+
+https://github.com/user-attachments/assets/1e5c46df-c794-4533-aa7f-7365c65c8a2d
+
+
+
+
+https://github.com/user-attachments/assets/24e1213b-4617-46eb-b5d5-cf4fb08a80dd
+
