@@ -1,6 +1,6 @@
 # Distillation and Post-Training for Wan2.1
 
-This project focuses on the distillation and post-training processes for the Wan2.1 model, aiming to enhance its efficiency and performance.
+This project focuses on the distillation and post-training processes for the Wan2.1 model, aiming to enhance its efficiency and performance. **TLDR: We achieved high-quality video generation in just 5 steps. [See impressive results in the "Combined Techniques" section below](#combined-techniques).** All data processing, training and infernce code along with model weights are open-sourced.
 
 ## References
 This work is based on:
@@ -69,6 +69,10 @@ orignial cfg-distilled 30 steps vs. further step-distilled 15 steps
   </tr>
 </table>
 
+### DMD2
+* **Description**: Distribution Matching Distillation is applied to further optimize the model.
+* **Implementation**: For detailed implementation, see [DMD2_wanx](https://github.com/azuresky03/DMD2_wanx).
+
 ## Reinforcement Learning (RL)
 * **Method**: Implemented according to the concept from [DRaFT](https://arxiv.org/pdf/2309.17400).
 * **Reward**: HPSReward V2.1, with implementation from Easyanimate.
@@ -117,3 +121,9 @@ https://github.com/user-attachments/assets/24e1213b-4617-46eb-b5d5-cf4fb08a80dd
 
 
 https://github.com/user-attachments/assets/6e11c8cd-45c6-47f2-9b19-f5831a75e710
+
+
+## Model Weights
+All pretrained model weights are available for download:
+* **Baidu Pan**: [https://pan.baidu.com/s/1wUCrRY9Fu8GdDMTZXdc7tw?pwd=m9kn](https://pan.baidu.com/s/1wUCrRY9Fu8GdDMTZXdc7tw?pwd=m9kn)
+* **Access Code**: `m9kn`
