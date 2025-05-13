@@ -20,22 +20,10 @@ The following distillation techniques are utilized in this project:
 * **Training**: Run the script `scripts/train/sh/distill_cfg_i2v.sh`.
 * **Comparative Results**:
   
-distilled
-
-https://github.com/user-attachments/assets/0ee4a260-0dee-47d2-a080-9f7a60d83825
-
-original
-
-https://github.com/user-attachments/assets/62a62cc3-ad78-4477-95d2-ca711d569b5e
-
-
-distilled
-
-https://github.com/user-attachments/assets/18981a28-a7d7-4008-8653-4aed35ffe052
-
-original
-
-https://github.com/user-attachments/assets/f84b27c4-048b-4f05-941a-f974936d7a10
+| Distilled | Original |
+|:---:|:---:|
+| ![distilled](https://github.com/user-attachments/assets/0ee4a260-0dee-47d2-a080-9f7a60d83825) | ![original](https://github.com/user-attachments/assets/62a62cc3-ad78-4477-95d2-ca711d569b5e) |
+| ![distilled](https://github.com/user-attachments/assets/18981a28-a7d7-4008-8653-4aed35ffe052) | ![original](https://github.com/user-attachments/assets/f84b27c4-048b-4f05-941a-f974936d7a10) |
 
 ### Step Distillation
 * **Training**: Run the script `scripts/train/sh/distill_step.sh`.
