@@ -127,3 +127,13 @@ https://github.com/user-attachments/assets/6e11c8cd-45c6-47f2-9b19-f5831a75e710
 All pretrained model weights are available for download:
 * **Baidu Pan**: [https://pan.baidu.com/s/1wUCrRY9Fu8GdDMTZXdc7tw?pwd=m9kn](https://pan.baidu.com/s/1wUCrRY9Fu8GdDMTZXdc7tw?pwd=m9kn)
 * **Access Code**: `m9kn`
+
+## Environment Setup
+
+* **Dependencies**: All required packages are listed in the `environment.yml` file.
+* **FastVideo**: This project requires FastVideo. Please install our forked version from:
+  ```bash
+  git clone https://github.com/azuresky03/FastVideo.git
+  cd FastVideo
+  pip install -e .
+  ```
