@@ -1,11 +1,29 @@
 # Distillation and Post-Training for Wan2.1
 
-This project focuses on the distillation and post-training processes for the Wan2.1 model, aiming to enhance its efficiency and performance. **TLDR: We achieved high-quality video generation in just 5 steps. [See impressive results in the "Combined Techniques" section below](#combined-techniques).** All data processing, training and infernce code along with model weights are open-sourced.
+**TL;DR —** High-quality video generation in just **five denoising steps**.  
+See the results in the [Combined Techniques](#combined-techniques) section.
+
+This project focuses on the distillation and post-training processes for the Wan2.1 model, aiming to enhance its efficiency and performance. All data processing, training and inference code along with model weights are open-sourced.
+
+## Table of Contents
+- [References](#references)
+- [Data Preprocessing](#data-preprocessing)
+- [Distillation Techniques](#distillation-techniques)
+  - [CFG Distillation](#cfg-distillation)
+  - [Step Distillation](#step-distillation)
+  - [DMD2](#dmd2)
+- [Reinforcement Learning](#reinforcement-learning-rl)
+- [Inference](#inference)
+- [Combined Techniques](#combined-techniques)
+- [Model Weights](#model-weights)
+- [Environment Setup](#environment-setup)
 
 ## References
 This work is based on:
 * [Wan-Video/Wan2.1](https://github.com/Wan-Video/Wan2.1)
 * [hao-ai-lab/FastVideo](https://github.com/hao-ai-lab/FastVideo)
+
+The work is done at [Zulution AI](https://huggingface.co/ZuluVision)
 
 ## Data Preprocessing
 * Assuming your video data has been uniformly resized, run `scripts/data_preprocess/preprocess.sh` to preprocess the features required for model input.
